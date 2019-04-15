@@ -1,0 +1,47 @@
+time: 6
+max jumps: 271
+gnuplot: octagon clock, _f1
+init: 
+  mode: startmode
+  states:
+    - x1 in [-0.05, -0.025]
+    - x2 in [-0.025, 0]
+    - x3 in [0, 0]
+    - x4 in [0, 0]
+    - x5 in [0, 0]
+    - x6 in [0, 0]     
+    - k in [0, 0] 
+
+unsafe:
+  - mode: Segment1
+    states:
+    - x1 >= 0.32
+    - x1 <= -0.32
+    - x2 >= 0.32
+    - x2 <= -0.32
+    - x3 >= 0.32
+    - x3 <= -0.32
+  - mode: Segment2
+    states:
+    - x1 >= 0.32
+    - x1 <= -0.32
+    - x2 >= 0.32
+    - x2 <= -0.32
+    - x3 >= 0.32
+    - x3 <= -0.32
+  - mode: Segment3
+    states:
+    - x1 >= 0.32
+    - x1 <= -0.32
+    - x2 >= 0.32
+    - x2 <= -0.32
+    - x3 >= 0.32
+    - x3 <= -0.32
+  - mode: Segment4
+    states:
+    - x1 >= 0.32
+    - x1 <= -0.32
+    - x2 >= 0.32
+    - x2 <= -0.32
+    - x3 >= 0.32
+    - x3 <= -0.32    

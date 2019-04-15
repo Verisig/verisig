@@ -1,0 +1,344 @@
+<?xml version="1.0" encoding="iso-8859-1"?>
+<sspaceex xmlns="http://www-verimag.imag.fr/xml-namespaces/sspaceex" version="0.2" math="SpaceEx">
+  <component id="model">
+    <param name="x1" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="x2" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="x3" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="x4" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="x5" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="x6" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="u1" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="u2" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="u3" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="k" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="clock" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="d28" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="d34" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="d35" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="d36" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="d37" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="d38" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="d45" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="d46" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="d47" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="d48" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="d56" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="d57" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="d58" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="d67" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="d68" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="d78" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="_f1" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="_f2" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="_f3" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="_f4" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="_f5" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="_f6" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="_f7" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="_f8" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="_f9" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="_f10" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="_f11" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="_f12" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="_f13" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="_f14" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="_f15" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="_f16" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="_f17" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="_f18" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="_f19" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="_f20" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <location id="1" name="DNN" x="357.0" y="315.0" width="118.0" height="96.0" />
+    <location id="2" name="ControlCompute" x="561.0" y="312.0" width="116.0" height="90.0">
+      <invariant>clock &lt;= 0</invariant>
+      <flow>clock' == 1</flow>
+    </location>
+    <location id="3" name="Segment1" x="236.0" y="107.0" width="134.0" height="106.0">
+      <invariant>clock &lt;= 0.2</invariant>
+      <flow>x1' == x4 - 0.25 &amp;
+x2' == x5 + 0.25 &amp;
+x3' == x6 &amp;
+x4' == 9.81 * sin(u1) / cos(u1) &amp;
+x5' == - 9.81 * sin(u2) / cos(u2) &amp;
+x6' == u3 - 9.81 &amp;
+clock' == 1</flow>
+    </location>
+    <location id="4" name="Segment2" x="737.0" y="93.0" width="136.0" height="104.0">
+      <invariant>clock &lt;= 0.2</invariant>
+      <flow>x1' == x4 - 0.25 &amp;
+x2' == x5 - 0.25 &amp;
+x3' == x6 &amp;
+x4' == 9.81 * sin(u1) / cos(u1) &amp;
+x5' == - 9.81 * sin(u2) / cos(u2) &amp;
+x6' == u3 - 9.81 &amp;
+clock' == 1</flow>
+    </location>
+    <location id="5" name="Segment3" x="243.0" y="505.0" width="132.0" height="96.0">
+      <invariant>clock &lt;= 0.2</invariant>
+      <flow>x1' == x4 &amp;
+x2' == x5 + 0.25 &amp;
+x3' == x6 &amp;
+x4' == 9.81 * sin(u1) / cos(u1) &amp;
+x5' == - 9.81 * sin(u2) / cos(u2) &amp;
+x6' == u3 - 9.81 &amp;
+clock' == 1</flow>
+    </location>
+    <location id="6" name="Segment4" x="739.0" y="507.0" width="142.0" height="104.0">
+      <invariant>clock &lt;= 0.2</invariant>
+      <flow>x1' == x4 + 0.25 &amp;
+x2' == x5 - 0.25 &amp;
+x3' == x6 &amp;
+x4' == 9.81 * sin(u1) / cos(u1) &amp;
+x5' == - 9.81 * sin(u2) / cos(u2) &amp;
+x6' == u3 - 9.81 &amp;
+clock' == 1</flow>
+    </location>
+    <location id="7" name="Planner" x="858.0" y="307.0" width="120.0" height="90.0">
+      <invariant>clock &lt;= 0</invariant>
+      <flow>clock' == 1</flow>
+    </location>
+    <location id="8" name="startmode" x="195.0" y="314.0">
+      <invariant>clock &lt;= 0</invariant>
+      <flow>clock' == 1</flow>
+    </location>
+    <transition source="1" target="2">
+      <guard>clock = 0</guard>
+      <assignment>_f9 := _f1 - _f2 &amp;
+_f10 := _f1 - _f3 &amp;
+_f11 := _f1 - _f4 &amp;
+_f12 := _f1 - _f5 &amp;
+_f13 := _f1 - _f6 &amp;
+_f14 := _f1 - _f7 &amp;
+_f15 := _f1 - _f8 &amp;
+_f16 := _f2 - _f3 &amp;
+_f17 := _f2 - _f4 &amp;
+_f18 := _f2 - _f5 &amp;
+_f19 := _f2 - _f6 &amp;
+_f20 := _f2 - _f7 &amp;
+d28 := _f2 - _f8 &amp;
+d34 := _f3 - _f4 &amp;
+d35 := _f3 - _f5 &amp;
+d36 := _f3 - _f6 &amp;
+d37 := _f3 - _f7 &amp;
+d38 := _f3 - _f8 &amp;
+d45 := _f4 - _f5 &amp;
+d46 := _f4 - _f6 &amp;
+d47 := _f4 - _f7 &amp;
+d48 := _f4 - _f8 &amp;
+d56 := _f5 - _f6 &amp;
+d57 := _f5 - _f7 &amp;
+d58 := _f5 - _f8 &amp;
+d67 := _f6 - _f7 &amp;
+d68 := _f6 - _f8 &amp;
+d78 := _f7 - _f8</assignment>
+      <labelposition x="-41.0" y="11.0" width="84.0" height="70.0" />
+    </transition>
+    <transition source="3" target="1">
+      <guard>clock = 0.2</guard>
+      <assignment>_f1 := 0.2 * x1 &amp;
+_f2 := 0.2 * x2 &amp;
+_f3 := 0.2 * x3 &amp;
+_f4 := 0.1 * x4 &amp;
+_f5 := 0.1 * x5 &amp;
+_f6 := 0.1 * x6 &amp;
+clock := 0 &amp;
+k := k + 1</assignment>
+      <labelposition x="-39.0" y="-40.0" width="96.0" height="82.0" />
+    </transition>
+    <transition source="5" target="1">
+      <guard>clock = 0.2</guard>
+      <assignment>_f1 := 0.2 * x1 &amp;
+_f2 := 0.2 * x2 &amp;
+_f3 := 0.2 * x3 &amp;
+_f4 := 0.1 * x4 &amp;
+_f5 := 0.1 * x5 &amp;
+_f6 := 0.1 * x6 &amp;
+clock := 0 &amp;
+k := k + 1</assignment>
+      <labelposition x="-61.0" y="-40.0" width="126.0" height="86.0" />
+    </transition>
+    <transition source="4" target="1">
+      <guard>clock = 0.2</guard>
+      <assignment>_f1 := 0.2 * x1 &amp;
+_f2 := 0.2 * x2 &amp;
+_f3 := 0.2 * x3 &amp;
+_f4 := 0.1 * x4 &amp;
+_f5 := 0.1 * x5 &amp;
+_f6 := 0.1 * x6 &amp;
+clock := 0 &amp;
+k := k + 1</assignment>
+      <labelposition x="-19.0" y="-66.0" width="116.0" height="86.0" />
+    </transition>
+    <transition source="6" target="1">
+      <guard>clock = 0.2</guard>
+      <assignment>_f1 := 0.2 * x1 &amp;
+_f2 := 0.2 * x2 &amp;
+_f3 := 0.2 * x3 &amp;
+_f4 := 0.1 * x4 &amp;
+_f5 := 0.1 * x5 &amp;
+_f6 := 0.1 * x6 &amp;
+clock := 0 &amp;
+k := k + 1</assignment>
+      <labelposition x="-3.0" y="-16.0" width="116.0" height="82.0" />
+    </transition>
+    <transition source="2" target="7">
+      <guard>clock = 0 &amp;
+_f15 &lt;= 0 &amp;
+d28 &lt;= 0 &amp;
+d38 &lt;= 0 &amp;
+d48 &lt;= 0 &amp;
+d58 &lt;= 0 &amp;
+d68 &lt;= 0 &amp;
+d78 &lt;= 0</guard>
+      <assignment>u1 := 0.1 &amp;
+u2 := 0.1 &amp;
+u3 := 11.81</assignment>
+      <labelposition x="-24.0" y="-22.0" />
+      <middlepoint x="667.5" y="221.5" />
+    </transition>
+    <transition source="2" target="7">
+      <guard>clock = 0 &amp;
+_f14 &lt;= 0 &amp;
+_f20 &lt;= 0 &amp;
+d37 &lt;= 0 &amp;
+d47 &lt;= 0 &amp;
+d57 &lt;= 0 &amp;
+d67 &lt;= 0 &amp;
+d78 &gt;= 0</guard>
+      <assignment>u1 := 0.1 &amp;
+u2 := 0.1 &amp;
+u3 := 7.81</assignment>
+      <labelposition x="-15.0" y="-19.0" />
+      <middlepoint x="666.5" y="245.5" />
+    </transition>
+    <transition source="2" target="7">
+      <guard>clock = 0 &amp;
+_f13 &lt;= 0 &amp;
+_f19 &lt;= 0 &amp;
+d36 &lt;= 0 &amp;
+d46 &lt;= 0 &amp;
+d56 &lt;= 0 &amp;
+d67 &gt;= 0 &amp;
+d68 &gt;= 0</guard>
+      <assignment>u1 := 0.1 &amp;
+u2 := -0.1 &amp;
+u3 := 11.81</assignment>
+      <labelposition x="0.0" y="0.0" />
+      <middlepoint x="664.5" y="269.5" />
+    </transition>
+    <transition source="2" target="7">
+      <guard>clock = 0 &amp;
+_f12 &lt;= 0 &amp;
+_f18 &lt;= 0 &amp;
+d35 &lt;= 0 &amp;
+d45 &lt;= 0 &amp;
+d56 &gt;= 0 &amp;
+d57 &gt;= 0 &amp;
+d58 &gt;= 0</guard>
+      <assignment>u1 := 0.1 &amp;
+u2 := -0.1 &amp;
+u3 := 7.81</assignment>
+      <labelposition x="-17.0" y="-14.0" />
+      <middlepoint x="667.5" y="287.5" />
+    </transition>
+    <transition source="2" target="7">
+      <guard>clock = 0 &amp;
+_f11 &lt;= 0 &amp;
+_f17 &lt;= 0 &amp;
+d34 &lt;= 0 &amp;
+d45 &gt;= 0 &amp;
+d46 &gt;= 0 &amp;
+d47 &gt;= 0 &amp;
+d48 &gt;= 0</guard>
+      <assignment>u1 := -0.1 &amp;
+u2 := 0.1 &amp;
+u3 := 11.81</assignment>
+      <labelposition x="-24.0" y="-24.0" />
+      <middlepoint x="671.5" y="327.5" />
+    </transition>
+    <transition source="2" target="7">
+      <guard>clock = 0 &amp;
+_f10 &lt;= 0 &amp;
+_f16 &lt;= 0 &amp;
+d34 &gt;= 0 &amp;
+d35 &gt;= 0 &amp;
+d36 &gt;= 0 &amp;
+d37 &gt;= 0 &amp;
+d38 &gt;= 0</guard>
+      <assignment>u1 := -0.1 &amp;
+u2 := 0.1 &amp;
+u3 := 7.81</assignment>
+      <labelposition x="-22.0" y="-16.0" />
+      <middlepoint x="666.5" y="351.5" />
+    </transition>
+    <transition source="2" target="7">
+      <guard>clock = 0 &amp;
+_f9 &lt;= 0 &amp;
+_f16 &gt;= 0 &amp;
+_f17 &gt;= 0 &amp;
+_f18 &gt;= 0 &amp;
+_f19 &gt;= 0 &amp;
+_f20 &gt;= 0 &amp;
+d28 &gt;= 0</guard>
+      <assignment>u1 := -0.1 &amp;
+u2 := -0.1 &amp;
+u3 := 11.81</assignment>
+      <labelposition x="-21.0" y="-23.0" />
+      <middlepoint x="665.5" y="373.5" />
+    </transition>
+    <transition source="2" target="7">
+      <guard>clock = 0 &amp;
+_f9 &gt;= 0 &amp;
+_f10 &gt;= 0 &amp;
+_f11 &gt;= 0 &amp;
+_f12 &gt;= 0 &amp;
+_f13 &gt;= 0 &amp;
+_f14 &gt;= 0 &amp;
+_f15 &gt;= 0</guard>
+      <assignment>u1 := -0.1 &amp;
+u2 := -0.1 &amp;
+u3 := 7.81</assignment>
+      <labelposition x="-18.0" y="-6.0" />
+      <middlepoint x="666.5" y="400.5" />
+    </transition>
+    <transition source="7" target="3">
+      <guard>clock = 0 &amp;
+k &lt;= 9</guard>
+      <labelposition x="-43.0" y="8.0" width="86.0" height="86.0" />
+      <middlepoint x="435.5" y="25.5" />
+    </transition>
+    <transition source="7" target="4">
+      <guard>clock = 0 &amp;
+k &gt;= 10 &amp;
+k &lt;= 19</guard>
+      <labelposition x="-5.0" y="-46.0" width="126.0" height="92.0" />
+    </transition>
+    <transition source="7" target="5">
+      <guard>clock = 0 &amp;
+k &gt;= 20 &amp;
+k &lt;= 24</guard>
+      <labelposition x="-50.0" y="-98.0" width="82.0" height="82.0" />
+      <middlepoint x="435.0" y="585.5" />
+    </transition>
+    <transition source="7" target="6">
+      <guard>clock = 0 &amp;
+k &gt;= 25 &amp;
+k &lt;= 29</guard>
+      <labelposition x="8.0" y="-45.0" width="92.0" height="96.0" />
+    </transition>
+    <transition source="8" target="1">
+      <guard>clock = 0</guard>
+      <assignment>_f1 := 0.2 * x1 &amp;
+_f2 := 0.2 * x2 &amp;
+_f3 := 0.2 * x3 &amp;
+_f4 := 0.1 * x4 &amp;
+_f5 := 0.1 * x5 &amp;
+_f6 := 0.1 * x6</assignment>
+      <labelposition x="-28.0" y="-1.0" />
+    </transition>
+  </component>
+  <component id="quad_sys">
+    <bind component="model" as="system" x="240.0" y="156.0" />
+  </component>
+</sspaceex>
+

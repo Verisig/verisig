@@ -1,0 +1,14 @@
+time: 115
+max jumps: 1150
+gnuplot: octagon x1, x2
+init: 
+  mode: mode2
+  states:
+    - x1 in [-0.45, -0.43]
+    - x2 in [0, 0]
+    - reward in [0, 0] 
+
+unsafe:
+  - mode: mode3
+    states:
+    - reward <= 90
