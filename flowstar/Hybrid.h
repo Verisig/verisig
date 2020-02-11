@@ -23,13 +23,16 @@ class ResetMap
 {
 public:
 	TaylorModelVec tmvReset;
+	std::vector<bool> is_identity;
 public:
 	ResetMap();
 	ResetMap(const TaylorModelVec & tmv);
+	ResetMap(const TaylorModelVec & tmv, const std::vector<bool> & identity);
 	ResetMap(const ResetMap & reset);
 	~ResetMap();
 
 	void reset(TaylorModelVec & result, const TaylorModelVec & tmv, const std::vector<Interval> & domain, const int order, const Interval & cutoff_threshold) const;
+	void reset(Flowpipe & result, const Flowpipe & flowpipe, const Continuous_Reachability_Setting & crs) const;
 
 	ResetMap & operator = (const ResetMap & reset);
 };
@@ -164,7 +167,7 @@ private:
 
 	int initialMode;
 	Flowpipe initialSet;
-
+	
 public:
 	HybridSystem();
 	HybridSystem(const HybridSystem & hybsys);
@@ -188,7 +191,6 @@ public:
 			const double step, const double time, const int order, const bool bPrint, std::vector<bool> & invariant_boundary_intersected,
 			const std::vector<std::string> & modeNames, const std::vector<std::string> & stateVarNames, const Interval & cutoff_threshold,
 			const std::vector<PolynomialConstraint> & unsafeSet, const bool bSafetyChecking, const bool bPlot, const bool bDump);
-
 
 	// only use Picard operation
 	// fixed step sizes and orders

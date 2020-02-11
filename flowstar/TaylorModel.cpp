@@ -507,7 +507,7 @@ void TaylorModel::mul_insert_ctrunc(TaylorModel & result, const TaylorModel & tm
 	result.remainder = I1xI2;
 	result.remainder += P2xI1;
 	result.remainder += P1xI2;
-
+	
 	result.ctrunc(domain, order);
 	result.cutoff(domain, cutoff_threshold);
 }
@@ -908,6 +908,7 @@ void TaylorModel::insert_ctrunc(TaylorModel & result, const TaylorModelVec & var
 
 		hf.insert_ctrunc(result, vars, varsPolyRange, domain, order, cutoff_threshold);
 		result.remainder += remainder;
+
 	}
 }
 
@@ -944,6 +945,7 @@ void TaylorModel::insert_no_remainder_no_cutoff(TaylorModel & result, const Tayl
 {
 	if(vars.tms.size() == 0)
 	{
+
 		result = *this;
 
 		std::list<Monomial>::iterator iter;
@@ -959,12 +961,12 @@ void TaylorModel::insert_no_remainder_no_cutoff(TaylorModel & result, const Tayl
 				++iter;
 			}
 		}
+		printf("blah6\n");
 	}
 	else
 	{
 		HornerForm hf;
 		expansion.toHornerForm(hf);
-
 		hf.insert_no_remainder_no_cutoff(result, vars, numVars, order);
 	}
 }
@@ -1153,6 +1155,7 @@ void TaylorModel::rmZeroTerms(const std::vector<int> & indices)
 
 void TaylorModel::normalize(std::vector<Interval> & domain)
 {
+
 	int domainDim = domain.size();
 
 	// compute the center of the original domain and make it origin-centered
@@ -3437,7 +3440,7 @@ void TaylorModelVec::insert_normal(TaylorModelVec & result, const TaylorModelVec
 void TaylorModelVec::insert_ctrunc(TaylorModelVec & result, const TaylorModelVec & vars, const std::vector<Interval> & varsPolyRange, const std::vector<Interval> & domain, const int order, const Interval & cutoff_threshold) const
 {
 	result.clear();
-	//printf("HERE?\n");
+
 	for(int i=0; i<tms.size(); ++i)
 	{
 		TaylorModel tmTemp;
@@ -4522,7 +4525,6 @@ void TaylorModelVec::Picard_non_polynomial_taylor_no_remainder_assign(const Tayl
 	*this = result;
 }
 
-//Rado, here O.o
 void TaylorModelVec::Picard_non_polynomial_taylor_ctrunc_normal(TaylorModelVec & result, const TaylorModelVec & x0, const std::vector<std::string> & strOde, const std::vector<Interval> & step_exp_table, const int order, const Interval & cutoff_threshold, const std::vector<bool> & constant, const std::vector<Interval> & constant_part) const
 {
 	TaylorModelVec tmvTemp;
@@ -4551,13 +4553,6 @@ void TaylorModelVec::Picard_non_polynomial_taylor_ctrunc_normal(TaylorModelVec &
 
 	for(int i=0; i<strOde.size(); ++i)
 	{
-	  
-	        if(i == 1){
-		    TaylorModel curTM = x0.tms[i];
-
-		}
-
-		
 		if(constant[i])
 		{
 			TaylorModel tmTemp(constant_part[i], rangeDim + 1);
@@ -4577,22 +4572,6 @@ void TaylorModelVec::Picard_non_polynomial_taylor_ctrunc_normal(TaylorModelVec &
 	tmvTemp.integral(tmvTemp2, step_exp_table[1]);
 
 	x0.add(result, tmvTemp2);
-
-	// TaylorModel tempTM = result.tms[0];
-	// std::string poly;
-
-	// std::vector<std::string> varNames;
-	// varNames.push_back("f1");
-	// varNames.push_back("x1");
-	// varNames.push_back("c1");
-	// varNames.push_back("f");
-	// varNames.push_back("clock");
-	// varNames.push_back("t");
-
-	// tempTM.expansion.toString(poly, varNames);
-
-	// std::cout << "temp polynomial :" << poly << "\n";
-	// std::cout << "temp poly remainder: " << tempTM.remainder.width() << "\n";
 }
 /*
 void TaylorModelVec::Picard_non_polynomial_taylor_ctrunc_normal_assign(const TaylorModelVec & x0, const std::vector<std::string> & strOde, const std::vector<Interval> & step_exp_table, const int order, const Interval & cutoff_threshold)
@@ -4830,6 +4809,7 @@ void TaylorModelVec::Picard_ctrunc_normal_remainder(std::vector<Interval> & resu
 
 void TaylorModelVec::normalize(std::vector<Interval> & domain)
 {
+
 	int domainDim = domain.size();
 	int rangeDim = tms.size();
 
@@ -4883,6 +4863,7 @@ void TaylorModelVec::normalize(std::vector<Interval> & domain)
 		tms[i].insert_no_remainder_no_cutoff(tmTemp, newVars, domainDim, tms[i].degree());
 		tms[i].expansion = tmTemp.expansion;
 	}
+
 }
 
 void TaylorModelVec::polyRange(std::vector<Interval> & result, const std::vector<Interval> & domain) const

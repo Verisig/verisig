@@ -4,23 +4,49 @@
   Email: Xin Chen <chenxin415@gmail.com> if you have questions or comments.
 
   The code is released as is under the GNU General Public License (GPL).
-**************************************************************************
-
-  This file was modified for use by Verisig
-  Authors: Radoslave Ivanov, Taylor J. Carpenter, James Weimer, Rajeev Alur, George J. Pappas, Insup Lee
-  Email: Taylor Carpenter <carptj@seas.upenn.edu> if you have questions or comments.
-
-  The modified code is released as is under the GNU General Public License (GPL).
 ---*/
 
 #include "Hybrid.h"
-#include <math.h>
-#include <iostream>
-#include <fstream>
+#include "AddedResets.h"
+#include "DNN.h"
+#include <map>
 #include <sys/time.h>
-#include <iomanip> 
 
 using namespace flowstar;
+
+//Code added by Rado: define some global DNN variables
+Continuous_Reachability_Setting dnn::dnn_crs;
+std::vector<ResetMap> dnn::dnn_resets;
+std::vector<dnn::activation> dnn::dnn_activations;
+bool dnn::dnn_initialized;
+ResetMap dnn::activation_reset;
+std::map<int, Flowpipe> dnn::saved_plant_states;
+std::map<int, int> dnn::branch_origin;
+int dnn::totalNumBranches;
+int dnn::curBranchId;
+float dnn::dnn_runtime;
+bool dnn::storedInitialConds;
+std::vector<std::string> dnn::initialConds;
+std::vector<std::string> dnn::augmentedVarNames;
+Variables dnn::augmentedStateVars;
+
+bool isClockInvariant(int mode, std::vector<std::vector<PolynomialConstraint>> invariants){
+        if(invariants[mode].size() == 1 && invariants[mode][0].p.monomials.size() == 1){
+
+	        Monomial constrM = invariants[mode][0].p.monomials.front();
+
+		      if(constrM.degree() == 1 && constrM.getDegrees()[constrM.getDegrees().size() - 1] == 1){
+			      //if here, we know we have exactly 1 invariant involving clock
+
+			      return true;
+
+		      }
+	}
+			  
+	return false;
+
+}
+//end of code added by Rado
 
 // class ResetMap
 
@@ -33,9 +59,16 @@ ResetMap::ResetMap(const TaylorModelVec & tmv)
 	tmvReset = tmv;
 }
 
+ResetMap::ResetMap(const TaylorModelVec & tmv, const std::vector<bool> & identity)
+{
+	tmvReset = tmv;
+	is_identity = identity;
+}
+
 ResetMap::ResetMap(const ResetMap & reset)
 {
 	tmvReset = reset.tmvReset;
+	is_identity = reset.is_identity;
 }
 
 ResetMap::~ResetMap()
@@ -47,6 +80,39 @@ void ResetMap::reset(TaylorModelVec & result, const TaylorModelVec & tmv, const 
 	std::vector<Interval> tmvPolyRange;
 	tmv.polyRange(tmvPolyRange, domain);
 	tmvReset.insert_ctrunc(result, tmv, tmvPolyRange, domain, order, cutoff_threshold);
+}
+
+void ResetMap::reset(Flowpipe & result, const Flowpipe & flowpipe, const Continuous_Reachability_Setting & crs) const
+{
+
+        TaylorModelVec tmv_flowpipe;
+
+	flowpipe.composition(tmv_flowpipe, crs.cutoff_threshold);
+
+	std::vector<Interval> fpPolyRange;
+	tmv_flowpipe.polyRange(fpPolyRange, flowpipe.domain);
+
+	TaylorModelVec tmv_img_flowpipe;
+	
+	for(int i=0; i<is_identity.size(); ++i)
+	{
+
+		if(is_identity[i])
+		{
+			tmv_img_flowpipe.tms.push_back(tmv_flowpipe.tms[i]);
+		}
+		else
+		{
+			TaylorModel tmTemp;
+			tmvReset.tms[i].insert_ctrunc(tmTemp, tmv_flowpipe, fpPolyRange, flowpipe.domain, crs.order, crs.cutoff_threshold);
+			tmv_img_flowpipe.tms.push_back(tmTemp);
+
+		}
+	}
+
+	Flowpipe fpTemp(tmv_img_flowpipe, flowpipe.domain);
+
+	result = fpTemp;
 }
 
 ResetMap & ResetMap::operator = (const ResetMap & reset)
@@ -6195,6 +6261,39 @@ int HybridSystem::reach_continuous_non_polynomial_taylor(std::list<TaylorModelVe
 				return UNCOMPLETED_UNKNOWN;
 			}
 		}
+
+	        //Code added by Rado
+	        //this is the continuous mode computation
+		//I am saving the flowpipe after all the normalizatoin so I don't have to normalize it when I load it
+
+		std::string curModeName = modeNames[mode];
+                if(flowpipes.size() > 0 && !strncmp(curModeName.c_str(), "_cont_", strlen("_cont_"))){
+
+		        //first, check if we're in a continuous dynamics mode
+		        //NB: this assumes that the last variable is used as the time variable
+		        //NB: this assumes that the invariant is a multiple of the time step
+
+		        if(isClockInvariant(mode, invariants)){
+
+			        Interval clockInv = invariants[mode][0].B;
+
+				std::vector<Interval> intBounds;
+				newFlowpipe.intEval(intBounds, cutoff_threshold);
+				Interval clockBounds = intBounds[intBounds.size() - 1];
+						
+				//printf("%s: [%13.10f, %13.10f]\n", stateVarNames[stateVarNames.size() - 1].c_str(), clockBounds.inf(), clockBounds.sup());
+
+				if(clockBounds.sup() >= clockInv.sup() && clockBounds.inf() < clockBounds.sup()){
+
+				        //store this flowpipe
+				        dnn::saved_plant_states[dnn::curBranchId] = Flowpipe(newFlowpipe);
+				}
+			  
+			}
+
+		}
+		//end of code added by Rado		
+		
 	}
 
 	return checking_result;
@@ -6461,22 +6560,6 @@ int HybridSystem::reach_continuous_non_polynomial_taylor(std::list<TaylorModelVe
 		std::vector<bool> & invariant_boundary_intersected, const std::vector<std::string> & modeNames, const Interval & cutoff_threshold,
 		const std::vector<PolynomialConstraint> & unsafeSet, const bool bSafetyChecking, const bool bPlot, const bool bDump) const
 {
-        //Code added by Rado
-        // std::string dom;
-
-	// std::vector<Interval> tempDom = initFp.domain;
-        // tempDom[3].toString(dom);
-	
-	// std::cout << "domain: " << dom << "\n";
-  
-	// Interval intC;
-	// TaylorModelVec tempTMV = initFp.tmv;
-        // tempTMV.tms[3].intEval(intC, tempDom);
-  
-	// printf("eval: [%f, %f]\n", intC.inf(), intC.sup());
-
-        //printf("HERE2?\n");
-  
 	std::vector<Interval> step_exp_table, step_end_exp_table;
 	Interval intZero;
 
@@ -6497,67 +6580,7 @@ int HybridSystem::reach_continuous_non_polynomial_taylor(std::list<TaylorModelVe
 
 	for(double t=THRESHOLD_HIGH; t < time;)
 	{
-
-	        //Code added by Rado
-
-	        // int res = -1;
-
-	        // if(flowpipes.size() > 0){
-
-		// 	Interval intC;
-		// 	std::list<TaylorModelVec>::iterator it = flowpipes.end();
-		// 	std::list<std::vector<Interval>>::iterator itDom = domains.end();
-			
-		// 	for(int i = 0; i < flowpipes.size(); i++){
-		// 	        it++;
-		// 		itDom++;
-		// 	}
-		// 	TaylorModelVec lastFp = *it;
-		// 	std::vector<Interval> lastDom = *itDom;
-		// 	lastFp.tms[stateVarNames.size() - 1].intEval(intC, lastDom);
-		// 	//printf("%s: [%f, %f]\n", stateVarNames[stateVarNames.size() - 1].c_str(), intC.inf(), intC.sup());
-
-		// 	if(intC.sup() <= 1){
-
-		// 	        std::vector<PolynomialConstraint> invs;
-
-		// 		res = currentFlowpipe.advance_non_polynomial_taylor(newFlowpipe, strOdes[mode], strOdes_centered[mode], precondition, step_exp_table, step_end_exp_table, newStep, miniStep, order, estimation, invs, cutoff_threshold, constant[mode], strOde_constant[mode]);
-
-		// 	}
-
-		// 	else{			  
-		// 	        //res = currentFlowpipe.advance_non_polynomial_taylor(newFlowpipe, strOdes[mode], strOdes_centered[mode], precondition, step_exp_table, step_end_exp_table, newStep, miniStep, order, estimation, invariants[mode], cutoff_threshold, constant[mode], strOde_constant[mode]);
-		// 	        res = -1;
-		// 	}
-
-		// }
-
-		// else{
-
-		//         std::string poly;
-
-		// 	std::vector<std::string> realVarNames;
-		// 	Variables realStateVars;
-		// 	realVarNames.push_back("local_t");
-		// 	realStateVars.declareVar("local_t");
-
-		// 	for(int varInd = 0; varInd < stateVarNames.size(); varInd ++){
-		  
-		// 	        realVarNames.push_back(stateVarNames[varInd]);
-		// 		realStateVars.declareVar(stateVarNames[varInd]);
-		// 	}
-
-		//         Interval clockInv = invariants[mode][0].B;
-
-		// 	if(clockInv.sup() > 0){
-			
-		// 	        res = currentFlowpipe.advance_non_polynomial_taylor(newFlowpipe, strOdes[mode], strOdes_centered[mode], precondition, step_exp_table, step_end_exp_table, newStep, miniStep, order, estimation, invariants[mode], cutoff_threshold, constant[mode], strOde_constant[mode]);
-		// 	}
-		// 	else{
-		// 	        res = -1;
-		// 	}
-		// }
-
+	  
 		int res = currentFlowpipe.advance_non_polynomial_taylor(newFlowpipe, strOdes[mode], strOdes_centered[mode], precondition, step_exp_table, step_end_exp_table, newStep, miniStep, order, estimation, invariants[mode], cutoff_threshold, constant[mode], strOde_constant[mode]);
 
 		if(res == -1)
@@ -6604,6 +6627,7 @@ int HybridSystem::reach_continuous_non_polynomial_taylor(std::list<TaylorModelVe
 
 				if(bSafetyChecking)
 				{
+
 					int safety = safetyChecking2(tmvCompo, newFlowpipe.domain, unsafeSet, order, cutoff_threshold);
 
 					if(safety == SAFE)
@@ -6688,6 +6712,8 @@ int HybridSystem::reach_continuous_non_polynomial_taylor(std::list<TaylorModelVe
 			}
 			case 2: 	// time interval is contracted
 			{
+
+
 				if(contracted_domain[0] > intZero)
 				{
 					return checking_result;
@@ -6738,7 +6764,7 @@ int HybridSystem::reach_continuous_non_polynomial_taylor(std::list<TaylorModelVe
 						printf("step = %f,\t", contracted_domain[0].sup());
 						printf("order = %d\n", order);
 					}
-
+					
 					return checking_result;
 				}
 			}
@@ -6772,6 +6798,36 @@ int HybridSystem::reach_continuous_non_polynomial_taylor(std::list<TaylorModelVe
 				return UNCOMPLETED_UNKNOWN;
 			}
 		}
+
+	        //Code added by Rado
+	        //this is the continuous mode computation
+		//I am saving the flowpipe after all the normalizatoin so I don't have to normalize it when I load it
+
+		std::string curModeName = modeNames[mode];
+                if(flowpipes.size() > 0 && !strncmp(curModeName.c_str(), "_cont_", strlen("_cont_"))){
+		  
+		        //first, check if we're in a continuous dynamics mode
+		        //NB: this assumes that the last variable is used as the time variable
+		        //NB: this assumes that the invariant is a multiple of the time step
+
+		        if(isClockInvariant(mode, invariants)){
+
+			        Interval clockInv = invariants[mode][0].B;
+
+				std::vector<Interval> intBounds;
+				newFlowpipe.intEval(intBounds, cutoff_threshold);
+				Interval clockBounds = intBounds[intBounds.size() - 1];
+						
+				//printf("%s: [%13.10f, %13.10f]\n", stateVarNames[stateVarNames.size() - 1].c_str(), clockBounds.inf(), clockBounds.sup());
+				if(clockBounds.sup() >= clockInv.sup() && clockBounds.inf() < clockInv.sup()){
+				        //store this flowpipe
+				        dnn::saved_plant_states[dnn::curBranchId] = Flowpipe(newFlowpipe);
+				}
+			  
+			}
+
+		}
+		//end of code added by Rado		
 	}
 
 	return checking_result;
@@ -7551,1529 +7607,6 @@ int HybridSystem::reach_continuous_non_polynomial_taylor(std::list<TaylorModelVe
 	return checking_result;
 }
 
-//Code added by Rado
-Real sigmoid(Real input){
-        Real sig = Real(-1) * Real(input);
-	sig.exp_assign();
-	
-        return Real(1) / (Real(1) + sig);
-}
-
-Real tanh(Real input){
-        Real posExp = Real(input);
-	posExp.exp_assign();
-
-	Real negExp = Real(Real(-1) * input);
-	negExp.exp_assign();
-	
-        return (posExp - negExp)/(posExp + negExp);
-}
-
-Real swish(Real input){
-        return input * sigmoid(input);
-}
-
-Real swishTen(Real input){
-        return input * sigmoid(Real(10) * input);
-}
-
-Real swishTwenty(Real input){
-        return input * sigmoid(Real(20) * input);
-}
-
-Real swishHundred(Real input){
-        return input * sigmoid(Real(100) * input);
-}
-
-Real lambda(int lorder, int rorder, int order, Real input){
-        if (lorder + rorder == order + 1){
-
-	        Real sig = sigmoid(input);
-		sig.pow_assign(lorder);
-
-		Real oneMsig = Real(1) - sigmoid(input);
-		oneMsig.pow_assign(rorder);
-
-		return sig * oneMsig;
-	    
-	  
-	        //return pow(sigmoid(input), lorder) * pow(1 - sigmoid(input), rorder);
-	}
-
-	return Real(lorder) * lambda(lorder, rorder + 1, order, input) -
-	  Real(rorder) * lambda(lorder + 1, rorder, order, input);
-}
-
-Real tanhlambda(int lorder, int rorder, int rec, int order, Real input){
-
-        Real output;
-
-        if (rec == order - 1){
-
-	  output = Real(1) - tanh(input) * tanh(input);
-		output.pow_assign(rorder);
-	  
-	        //output = pow(1 - tanh(input) * tanh(input), rorder);
-        
-		if (lorder > 0){
-		        Real recReal = tanh(input);
-			recReal.pow_assign(lorder);
-
-			output = output * recReal;
-			
-		        //output = output * pow(tanh(input), lorder);
-		}
-
-	}
-        
-	else{                
-	        output =  Real(-1) * Real(2) * Real(rorder) * tanhlambda(lorder + 1, rorder, rec + 1, order, input);
-        
-		if (lorder > 0)
-		        output = output + Real(lorder) * tanhlambda(lorder - 1, rorder + 1, rec + 1, order, input);            
-	}
-
-	return output;
-
-}
-
-Real tanhDer(int order, Real input){
-        return tanhlambda(0, 1, 0, order, input);
-}
-
-Real sigDer(int order, Real input){
-        return lambda(1, 1, order, input);
-}
-
-
-Real getSig6thDerBound(Interval bounds){
-
-        if(bounds.inf() <= 1.5 && bounds.sup() >= -1.5){
-	        return Real(0.41);
-	}
-
-        if(bounds.inf() > 1.5 && bounds.inf() <= 3){
-	        return Real(0.11);
-	}
-
-        if(bounds.sup() >= -3 && bounds.sup() < -1.5){
-	        return Real(0.11);
-	}		
-
-	if(bounds.inf() > 3){
-	        return Real(0.041);
-	}
-
-	if(bounds.sup() < -3){
-	        return Real(0.041);
-	}		
-  
-        return Real(0.41);
-}
-
-Real getSig5thDerBound(Interval bounds){
-
-        if(bounds.inf() <= 0.8 && bounds.sup() >= -0.8){
-	        return Real(0.25);
-	}
-
-        if(bounds.inf() > 0.8 && bounds.inf() <= 3){
-	        return Real(0.13);
-	}
-
-        if(bounds.sup() >= -3 && bounds.sup() < -0.8){
-	        return Real(0.13);
-	}		
-
-	if(bounds.inf() > 3){
-	        return Real(0.007);
-	}
-
-	if(bounds.sup() < -3){
-	        return Real(0.007);
-	}		
-  
-        return Real(0.25);
-}
-
-//The hardcoded bounds used in this function are conservative numerical bounds
-Real getSig4thDerBound(Interval bounds){
-
-        //Region 5
-        if(bounds.inf() >= 3.15){
-	        return sigDer(4, Real(bounds.inf())).abs();
-	}
-
-	//Region 4.5
-	else if(bounds.inf() >= 3.13 && bounds.inf() <= 3.15){
-	        return Real(0.01908);
-	}
-
-	//Region 4
-        else if(bounds.inf() >= 0.85 && bounds.inf() <= 3.13){
-
-	        Real bound = sigDer(4, Real(bounds.inf())).abs();
-
-		//sup is in Region 4
-	        if(bounds.sup() <= 3.13){
-		  
-		        Real rbound = sigDer(4, Real(bounds.sup())).abs();
-			
-			if (rbound > bound) bound = rbound;
-		}		
-		//sup is in Region 5
-		else{
-		        if (Real(0.01908) > bound) bound = Real(0.01908);
-		}
-		
-	        return bound;
-	}
-
-	//Region 3.5
-	else if(bounds.inf() >= 0.83 && bounds.inf() <= 0.85){
-	        return Real(0.1277);
-	}	
-
-	//Region 3
-        else if(bounds.inf() >= -0.83 && bounds.inf() <= 0.83){
-	  
-	        Real bound = sigDer(4, Real(bounds.inf())).abs();
-
-		//sup is in Region 3
-	        if(bounds.sup() <= 0.83){
-		        Real rbound = sigDer(4, Real(bounds.sup())).abs();
-
-			if (rbound > bound) bound = rbound;
-		}
-		//sup is beyond the global max
-		else{
-		        bound = Real(0.1277);
-		}
-		
-	        return bound;
-	}
-
-	//Region 2.5
-	else if(bounds.inf() >= -0.85 && bounds.inf() <= -0.83){
-	        return Real(0.1277);
-	}
-
-	//Region 2
-	else if(bounds.inf() >= -3.13 && bounds.inf() <= -0.85){
-
-	        Real bound = sigDer(4, Real(bounds.inf())).abs();
-
-		//sup is in Region 2
-	        if(bounds.sup() <= -0.85){
-		        Real rbound = sigDer(4, Real(bounds.sup())).abs();
-
-			if (rbound > bound) bound = rbound;
-		}
-
-		//sup is beyond global max
-		else if(bounds.sup() >= -0.85){
-		        bound = Real(0.1277);
-		}
-		  
-	        return bound;
-	}
-
-	//Region 1.5
-	else if(bounds.inf() >= -3.15 && bounds.inf() <= -3.13){
-
-	        Real bound = Real(0.01908);
-
-		//sup is in Region 2
-	        if(bounds.sup() <= -0.85){
-		        Real rbound = sigDer(4, Real(bounds.sup())).abs();
-
-			if (rbound > bound) bound = rbound;
-		}
-
-		//sup is beyond global max
-		else if(bounds.sup() >= -0.85){
-		        bound = Real(0.1277);
-		}
-		  
-	        return bound;
-	}
-
-	//Region 1
-	else if(bounds.inf() <= -3.15){
-
-	        Real bound = sigDer(4, Real(bounds.inf())).abs();
-
-		//sup is in Region 1
-	        if(bounds.sup() <= -3.15){
-		        Real rbound = sigDer(4, Real(bounds.sup())).abs();
-
-			if (rbound > bound) bound = rbound;
-		}
-
-		//sup is in Region 2
-	        if(bounds.sup() <= -0.85){
-
-		        bound = Real(0.01908);
-			  
-		        Real rbound = sigDer(4, Real(bounds.sup())).abs();
-
-			if (rbound > bound) bound = rbound;
-		}		
-
-		//sup is beyond global max
-		else if(bounds.sup() >= -0.85){
-		        bound = Real(0.1277);
-		}
-		  
-	        return bound;
-	}	
-  
-        return Real(0.1277);
-}
-
-//The hardcoded bounds used in this function are conservative numerical bounds
-Real getSig3rdDerBound(Interval bounds){
-
-        //Region 4
-        if(bounds.inf() >= 2.3){
-	        return sigDer(3, Real(bounds.inf()));
-	}
-
-	//Region 3.5
-	else if(bounds.inf() >= 2.28 && bounds.inf() <= 2.3){
-	        return Real(0.0417);
-	}
-
-	//Region 3
-        else if(bounds.inf() >= 0 && bounds.inf() <= 2.28){
-
-	        Real bound = sigDer(3, Real(bounds.inf())).abs();
-
-		//sup is in Region 3
-	        if(bounds.sup() <= 2.28){
-		  
-		        Real rbound = sigDer(3, Real(bounds.sup())).abs();
-			
-			if (rbound > bound) bound = rbound;
-		}		
-		//sup is in Region 4
-		else{
-		        if (Real(0.0417) > bound) bound = Real(0.0417);
-		}
-		
-	        return bound;
-	}
-
-	//Region 2
-        else if(bounds.inf() >= -2.28 && bounds.inf() <= 0){
-	  
-	        Real bound = sigDer(3, Real(bounds.inf())).abs();
-
-		//sup is in Region 2
-	        if(bounds.sup() <= 0){
-		        Real rbound = sigDer(3, Real(bounds.sup())).abs();
-
-			if (rbound > bound) bound = rbound;
-		}
-
-		else{
-		        bound = Real(0.126);
-		}
-		
-	        return bound;
-	}
-
-	//Region 1.5
-        else if(bounds.inf() >= -2.3 && bounds.inf() <= -2.28){
-	  
-	        Real bound = Real(0.0417);
-
-		//sup is in Region 2
-	        if(bounds.sup() <= 0){
-		        Real rbound = sigDer(3, Real(bounds.sup())).abs();
-
-			if (rbound > bound) bound = rbound;
-		}
-
-		else{
-		        bound = Real(0.126);
-		}
-		
-	        return bound;
-	}				
-
-	//Region 1
-	else if(bounds.inf() <= -2.3){
-
-	        Real bound = sigDer(3, Real(bounds.inf())).abs();
-
-		//sup is in Region 1
-	        if(bounds.sup() <= -2.3){
-		        Real rbound = sigDer(3, Real(bounds.sup())).abs();
-
-			if (rbound > bound) bound = rbound;
-		}
-
-		//sup is in Region 2
-		else if(bounds.sup() >= -2.3 && bounds.sup() <= 0){
-		        bound = Real(0.0417);
-
-			Real rbound = sigDer(3, Real(bounds.sup())).abs();
-
-			if (rbound > bound) bound = rbound;
-		}
-
-		//sup is beyond global max
-		else if(bounds.sup() >= 0){
-		        bound = Real(0.126);
-		}
-		  
-	        return bound;
-	}		
-  
-        return Real(0.126);
-}
-
-
-Real getTanh6thDerBound(Interval bounds){
-
-        if(bounds.inf() <= 0.8 && bounds.sup() >= -0.8){
-	        return 52.2;
-	}
-
-        if(bounds.inf() > 0.8 && bounds.inf() <= 2){
-	        return 13.7;
-	}
-
-        if(bounds.sup() >= -2 && bounds.sup() < -0.8){
-	        return 13.7;
-	}		
-
-	if(bounds.inf() > 2 && bounds.inf() <= 4){
-	        return 0.6;
-	}	
-
-	if(bounds.inf() > 4){
-	        return 0.045;
-	}
-
-	if(bounds.sup() >= -4 && bounds.sup() < -2){
-	        return 0.6;
-	}	
-
-	if(bounds.sup() < -4){
-	        return 0.045;
-	}		
-  
-        return 52.2;
-}
-
-Real getTanh5thDerBound(Interval bounds){
-
-        if(bounds.inf() <= 0.4 && bounds.sup() >= -0.4){
-	        return 16;
-	}
-
-        if(bounds.inf() > 0.4 && bounds.inf() <= 1.5){
-	        return 7.7;
-	}
-
-        if(bounds.sup() >= -1.5 && bounds.sup() < -0.4){
-	        return 7.7;
-	}		
-
-	if(bounds.inf() > 1.5 && bounds.inf() <= 4){
-	        return 0.7;
-	}	
-
-	if(bounds.inf() > 4){
-	        return 0.022;
-	}
-
-	if(bounds.sup() >= -4 && bounds.sup() < -1.5){
-	        return 0.7;
-	}	
-
-	if(bounds.sup() < -4){
-	        return 0.022;
-	}		
-  
-        return 16;
-}
-
-//The hardcoded bounds used in this function are conservative numerical bounds
-Real getTanh4thDerBound(Interval bounds){
-
-        //Region 5
-        if(bounds.inf() >= 1.573){
-	        return tanhDer(4, Real(bounds.inf())).abs();
-	}
-
-	//Region 4.5
-	else if(bounds.inf() >= 1.571 && bounds.inf() <= 1.573){
-	        return Real(0.61009);
-	}
-
-	//Region 4
-        else if(bounds.inf() >= 0.422 && bounds.inf() <= 1.571){
-
-	        Real bound = tanhDer(4, Real(bounds.inf())).abs();
-
-		//sup is in Region 4
-	        if(bounds.sup() <= 1.571){
-		  
-		        Real rbound = tanhDer(4, Real(bounds.sup())).abs();
-			
-			if (rbound > bound) bound = rbound;
-		}		
-		//sup is in Region 5
-		else{
-		        if (Real(0.61009) > bound) bound = Real(0.61009);
-		}
-		
-	        return bound;
-	}
-
-	//Region 3.5
-	else if(bounds.inf() >= 0.42 && bounds.inf() <= 0.422){
-	        return Real(4.0859);
-	}	
-
-	//Region 3
-        else if(bounds.inf() >= -0.42 && bounds.inf() <= 0.42){
-	  
-	        Real bound = tanhDer(4, Real(bounds.inf())).abs();
-
-		//sup is in Region 3
-	        if(bounds.sup() <= 0.42){
-		        Real rbound = tanhDer(4, Real(bounds.sup())).abs();
-
-			if (rbound > bound) bound = rbound;
-		}
-		//sup is beyond the global max
-		else{
-		        bound = Real(4.0859);
-		}
-		
-	        return bound;
-	}
-
-	//Region 2.5
-	else if(bounds.inf() >= -0.422 && bounds.inf() <= -0.42){
-	        return Real(4.0859);
-	}
-
-	//Region 2
-	else if(bounds.inf() >= -1.571 && bounds.inf() <= -0.422){
-
-	        Real bound = tanhDer(4, Real(bounds.inf())).abs();
-
-		//sup is in Region 2
-	        if(bounds.sup() <= -0.422){
-		        Real rbound = tanhDer(4, Real(bounds.sup())).abs();
-
-			if (rbound > bound) bound = rbound;
-		}
-
-		//sup is beyond global max
-		else if(bounds.sup() >= -0.422){
-		        bound = Real(4.0859);
-		}
-		  
-	        return bound;
-	}
-
-	//Region 1.5
-	else if(bounds.inf() >= -1.573 && bounds.inf() <= -1.571){
-
-	        Real bound = Real(0.61009);
-
-		//sup is in Region 2
-	        if(bounds.sup() <= -0.422){
-		        Real rbound = tanhDer(4, Real(bounds.sup())).abs();
-
-			if (rbound > bound) bound = rbound;
-		}
-
-		//sup is beyond global max
-		else if(bounds.sup() >= -0.422){
-		        bound = Real(4.0859);
-		}
-		  
-	        return bound;
-	}
-
-	//Region 1
-	else if(bounds.inf() <= -1.573){
-
-	        Real bound = tanhDer(4, Real(bounds.inf())).abs();
-
-		//sup is in Region 1
-	        if(bounds.sup() <= -1.573){
-		        Real rbound = tanhDer(4, Real(bounds.sup())).abs();
-
-			if (rbound > bound) bound = rbound;
-		}
-
-		//sup is in Region 2
-	        if(bounds.sup() <= -0.422){
-
-		        bound = Real(0.61009);
-			  
-		        Real rbound = tanhDer(4, Real(bounds.sup())).abs();
-
-			if (rbound > bound) bound = rbound;
-		}		
-
-		//sup is beyond global max
-		else if(bounds.sup() >= -0.422){
-		        bound = Real(4.0859);
-		}
-		  
-	        return bound;
-	}	
-  
-        return Real(4.0859);
-}
-
-//The hardcoded bounds used in this function are conservative numerical bounds
-Real getTanh3rdDerBound(Interval bounds){
-
-        //Region 4
-        if(bounds.inf() >= 1.147){
-	        return tanhDer(3, Real(bounds.inf()));
-	}
-
-	//Region 3.5
-	else if(bounds.inf() >= 1.145 && bounds.inf() <= 1.147){
-	        return Real(0.66667);
-	}
-
-	//Region 3
-        else if(bounds.inf() >= 0 && bounds.inf() <= 1.145){
-
-	        Real bound = tanhDer(3, Real(bounds.inf())).abs();
-
-		//sup is in Region 3
-	        if(bounds.sup() <= 1.145){
-		  
-		        Real rbound = tanhDer(3, Real(bounds.sup())).abs();
-			
-			if (rbound > bound) bound = rbound;
-		}		
-		//sup is in Region 4
-		else{
-		        if (Real(0.66667) > bound) bound = Real(0.66667);
-		}
-		
-	        return bound;
-	}
-
-	//Region 2
-        else if(bounds.inf() >= -1.145 && bounds.inf() <= 0){
-	  
-	        Real bound = tanhDer(3, Real(bounds.inf())).abs();
-
-		//sup is in Region 2
-	        if(bounds.sup() <= 0){
-		        Real rbound = tanhDer(3, Real(bounds.sup())).abs();
-
-			if (rbound > bound) bound = rbound;
-		}
-
-		else{
-		        bound = Real(2);
-		}
-		
-	        return bound;
-	}
-
-	//Region 1.5
-        else if(bounds.inf() >= -1.147 && bounds.inf() <= -1.145){
-	  
-	        Real bound = Real(0.66667);
-
-		//sup is in Region 2
-	        if(bounds.sup() <= 0){
-		        Real rbound = tanhDer(3, Real(bounds.sup())).abs();
-
-			if (rbound > bound) bound = rbound;
-		}
-
-		else{
-		        bound = Real(2);
-		}
-		
-	        return bound;
-	}
-
-	//Region 1
-	else if(bounds.inf() <= -1.147){
-
-	        Real bound = tanhDer(3, Real(bounds.inf())).abs();
-
-		//sup is in Region 1
-	        if(bounds.sup() <= -1.147){
-		        Real rbound = tanhDer(3, Real(bounds.sup())).abs();
-
-			if (rbound > bound) bound = rbound;
-		}
-
-		//sup is in Region 2
-		else if(bounds.sup() >= -1.147 && bounds.sup() <= 0){
-		        bound = Real(0.66667);
-
-			Real rbound = tanhDer(3, Real(bounds.sup())).abs();
-
-			if (rbound > bound) bound = rbound;
-		}
-
-		//sup is beyond global max
-		else if(bounds.sup() >= 0){
-		        bound = Real(2);
-		}
-		  
-	        return bound;
-	}		
-  
-        return Real(2);
-}
-
-Real getSwishHundred4thDerBound(Interval bounds){
-
-        if(bounds.inf() <= 0.007 && bounds.sup() >= -0.007){
-	        return Real(500000);
-	}
-
-        if(bounds.inf() > 0.007 && bounds.inf() <= 0.045){
-	        return Real(200000);
-	}
-
-        if(bounds.inf() >= -0.045 && bounds.inf() <= -0.007){
-	        return Real(200000);
-	}
-
-	if(bounds.inf() > 0.045 && bounds.inf() <= 0.12){
-	        return Real(4700);
-	}
-
-        if(bounds.sup() >= -0.12 && bounds.sup() < -0.045){
-	        return Real(4700);
-	}
-
-	if(bounds.sup() >= 0.12 && bounds.sup() < 0.17){
-	        return Real(50);
-	}
-
-	if(bounds.sup() >= -0.17 && bounds.sup() < -0.12){
-	        return Real(50);
-	}	
-
-	if(bounds.inf() > 0.17){
-	        return Real(0.55);
-	}
-
-	if(bounds.sup() < -0.17){
-	        return Real(0.55);
-	}		
-  
-        return Real(500000);
-}
-
-Real getSwishHundred3rdDerBound(Interval bounds){
-
-        if(bounds.inf() <= 0.2 && bounds.sup() >= -0.2){
-	        return Real(7400);
-	}
-
-        if(bounds.inf() > 0.2 && bounds.inf() <= 0.5){
-	        return Real(8800);
-	}
-
-        if(bounds.sup() >= -0.5 && bounds.sup() < -0.2){
-	        return Real(8800);
-	}
-
-        if(bounds.inf() > 0.5 && bounds.inf() <= 0.8){
-	        return Real(3000);
-	}
-
-        if(bounds.sup() >= -0.8 && bounds.sup() < -0.5){
-	        return Real(3000);
-	}
-
-        if(bounds.inf() > 0.8 && bounds.inf() <= 1.2){
-	        return Real(260);
-	}
-
-        if(bounds.sup() >= -1.2 && bounds.sup() < -0.8){
-	        return Real(260);
-	}	
-
-	if(bounds.inf() > 1.2){
-	        return Real(7.5);
-	}
-
-	if(bounds.sup() < -1.2){
-	        return Real(7.5);
-	}		
-  
-        return Real(8800);
-}
-
-Real getSwishTwenty4thDerBound(Interval bounds){
-
-        if(bounds.inf() <= 0.037 && bounds.sup() >= -0.037){
-	        return Real(5000);
-	}
-
-        if(bounds.inf() > 0.037 && bounds.inf() <= 0.25){
-	        return Real(1892);
-	}
-
-	if(bounds.inf() > 0.25 && bounds.inf() <= 0.71){
-	        return Real(10);
-	}
-
-        if(bounds.sup() >= -0.25 && bounds.sup() < -0.037){
-	        return Real(1892);
-	}
-
-	if(bounds.sup() >= -0.71 && bounds.sup() < -0.25){
-	        return Real(10);
-	}	
-
-	if(bounds.inf() > 0.71){
-	        return Real(0.055);
-	}
-
-	if(bounds.sup() < -0.71){
-	        return Real(0.055);
-	}		
-  
-        return Real(5000);
-}
-
-Real getSwishTwenty3rdDerBound(Interval bounds){
-
-        if(bounds.inf() <= 0.2 && bounds.sup() >= -0.2){
-	        return Real(160);
-	}
-
-        if(bounds.inf() > 0.2 && bounds.inf() <= 0.6){
-	        return Real(2.36);
-	}
-
-        if(bounds.sup() >= -0.6 && bounds.sup() < -0.2){
-	        return Real(2.36);
-	}			
-
-	if(bounds.inf() > 0.6){
-	        return Real(0.02);
-	}
-
-	if(bounds.sup() < -0.6){
-	        return Real(0.02);
-	}		
-  
-        return Real(160);
-}
-
-Real getSwishTen4thDerBound(Interval bounds){
-
-        if(bounds.inf() <= 0.071 && bounds.sup() >= -0.071){
-	        return Real(500);
-	}
-
-        if(bounds.inf() > 0.071 && bounds.inf() <= 0.4){
-	        return Real(204);
-	}
-
-	if(bounds.inf() > 0.4 && bounds.inf() <= 1.2){
-	        return Real(10);
-	}
-
-        if(bounds.sup() >= -0.4 && bounds.sup() < -0.071){
-	        return Real(204);
-	}
-
-	if(bounds.sup() >= -1.2 && bounds.sup() < -0.4){
-	        return Real(10);
-	}	
-
-	if(bounds.inf() > 1.2){
-	        return Real(0.05);
-	}
-
-	if(bounds.sup() < -1.2){
-	        return Real(0.05);
-	}		
-  
-        return Real(500);
-}
-
-Real getSwishTen3rdDerBound(Interval bounds){
-
-        if(bounds.inf() <= 0.3 && bounds.sup() >= -0.3){
-	        return Real(30.9);
-	}
-
-        if(bounds.inf() > 0.3 && bounds.inf() <= 0.91){
-	        return Real(2.6);
-	}
-
-        if(bounds.sup() >= -0.91 && bounds.sup() < -0.3){
-	        return Real(2.6);
-	}			
-
-	if(bounds.inf() > 0.91){
-	        return Real(0.07);
-	}
-
-	if(bounds.sup() < -0.91){
-	        return Real(0.07);
-	}		
-  
-        return Real(30.9);
-}
-
-Real getSwish4thDerBound(Interval bounds){
-
-        if(bounds.inf() <= 2.2 && bounds.sup() >= -2.2){
-	        return Real(0.13);
-	}
-
-        if(bounds.inf() > 2.2 && bounds.inf() <= 6){
-	        return Real(0.04);
-	}
-	
-        if(bounds.sup() >= -6 && bounds.sup() < -2.2){
-	        return Real(0.04);
-	}
-
-	if(bounds.inf() > 6){
-	        return Real(0.013);
-	}
-
-	if(bounds.sup() < -6){
-	        return Real(0.013);
-	}		
-  
-        return Real(0.13);
-}
-
-Real getSwish3rdDerBound(Interval bounds){
-
-        if(bounds.inf() <= 3 && bounds.sup() >= -3){
-	        return Real(0.31);
-	}
-
-        if(bounds.inf() > 3 && bounds.inf() <= 5){
-	        return Real(0.025);
-	}
-
-        if(bounds.sup() >= -5 && bounds.sup() < -3){
-	        return Real(0.025);
-	}			
-
-	if(bounds.inf() > 5){
-	        return Real(0.013);
-	}
-
-	if(bounds.sup() < -5){
-	        return Real(0.013);
-	}		
-  
-        return Real(0.31);
-}
-
-Real swish1stDer(Real input){
-        int derOrder = 1;
-	return sigmoid(input) + input * lambda(1, 1, derOrder, input);
-}
-
-Real swish2ndDer(Real input){
-        int derOrder = 1;
-	return Real(2) * lambda(1, 1, derOrder, input) + input * lambda(1, 1, derOrder + 1, input);
-}
-
-Real swish3rdDer(Real input){
-        int derOrder = 2;
-	return Real(3) * lambda(1, 1, derOrder, input) + input * lambda(1, 1, derOrder + 1, input);
-}
-
-Real swishTen1stDer(Real input){
-        int derOrder = 1;
-	return sigmoid(Real(10) * input) + Real(10) * input * lambda(1, 1, derOrder, Real(10) * input);
-}
-
-Real swishTen2ndDer(Real input){
-        int derOrder = 1;
-	return Real(20) * lambda(1, 1, derOrder, Real(10) * input) + Real(100) * input * lambda(1, 1, derOrder + 1, Real(10) * input);
-}
-
-Real swishTen3rdDer(Real input){
-        int derOrder = 2;
-	return Real(300) * lambda(1, 1, derOrder, Real(10) * input) + Real(1000) * input * lambda(1, 1, derOrder + 1, Real(10) * input);
-}
-
-Real swishTwenty1stDer(Real input){
-        int derOrder = 1;
-	return sigmoid(Real(20) * input) + Real(20) * input * lambda(1, 1, derOrder, Real(20) * input);
-}
-
-Real swishTwenty2ndDer(Real input){
-        int derOrder = 1;
-	return Real(40) * lambda(1, 1, derOrder, Real(20) * input) + Real(400) * input * lambda(1, 1, derOrder + 1, Real(20) * input);
-}
-
-Real swishTwenty3rdDer(Real input){
-        int derOrder = 2;
-	return Real(1600) * lambda(1, 1, derOrder, Real(20) * input) + Real(8000) * input * lambda(1, 1, derOrder + 1, Real(20) * input);
-}
-
-Real swishHundred1stDer(Real input){
-        int derOrder = 1;
-	return sigmoid(Real(100) * input) + Real(100) * input * lambda(1, 1, derOrder, Real(100) * input);
-}
-
-Real swishHundred2ndDer(Real input){
-        int derOrder = 1;
-	return Real(200) * lambda(1, 1, derOrder, Real(100) * input) + Real(1000) * input * lambda(1, 1, derOrder + 1, Real(100) * input);
-}
-
-Real swishHundred3rdDer(Real input){
-        int derOrder = 2;
-	return Real(30000) * lambda(1, 1, derOrder, Real(100) * input) + Real(1000000) * input * lambda(1, 1, derOrder + 1, Real(100) * input);
-}
-
-Real arctan(double input){
-
-        return Real(atan(input));
-}
-
-Real arctanCoef(int order){
-
-        if (order % 2 == 0) return Real(0);
-
-	if((order + 1) % 4 == 2) return Real(1.0/order);
-
-	else return Real(-1.0/order);
-}
-
-Real arctanDer(int order, Real input){
-
-	Real sum = 0;
-
-	bool posSign = true;
-
-	for(int i = 1; i <= order; i++){
-	        if (i % 2 != 0){
-		        Real nextEl = Real(input);
-
-			nextEl.pow_assign(i);
-
-			if(posSign) sum += nextEl/Real(i);
-
-			else sum -= nextEl/Real(i);
-
-			posSign = !posSign;
-		}
-
-	}
-
-	return sum;
-}
-
-//NB: this assumes intC \subset [-1, 1]
-Real getArcTanDerBound(double dev, int order){
-
-	return Real( (pow(dev, 2 * order + 1)) / (2 * order + 1));
-}
-
-Real tan(Real input){
-        Real denom = Real(input);
-	Real num = Real(input);
-
-	num.sin_assign();
-	denom.cos_assign();
-  
-        return num/denom;
-}
-
-Real tan1stDer(Real input){
-        return Real(1) + tan(input) * tan(input);
-}
-
-Real tan2ndDer(Real input){
-        return Real(2) * tan(input) + Real(2) * tan(input) * tan(input) * tan(input);
-}
-
-Real tan3rdDer(Real input){
-        return Real(2) + Real(8) * tan(input) * tan(input) + Real(6) * tan(input) * tan(input) * tan(input) * tan(input);
-}
-
-Real tan4thDer(Real input){
-        return Real(16) * tan(input) + Real(40) * tan(input) * tan(input) * tan(input) +
-	  Real(24) * tan(input) * tan(input) * tan(input) * tan(input) * tan(input);
-}
-
-Real getTanDerBound(int order, Interval intC){
-
-	if(order == 4){
-	        double low = fabs(tan4thDer(Real(intC.inf())).getValue_RNDD());
-		double high = fabs(tan4thDer(Real(intC.sup())).getValue_RNDU());
-
-		if (low > high) return Real(low);
-		else return Real(high);
-		  
-	}
-
-	else{ //if order == 3
-	        double low = fabs(tan3rdDer(Real(intC.inf())).getValue_RNDD());
-		double high = fabs(tan3rdDer(Real(intC.sup())).getValue_RNDU());
-
-		if (low > high) return Real(low);
-		else return Real(high);
-		  
-	}
-}
-
-Real sqrt(Real input){
-        Real output = Real(input);
-
-	output.sqrt_assign();
-  
-        return output;
-}
-
-Real sqrt1stDer(Real input){
-
-        Real inSqrt = Real(input);
-
-	inSqrt.sqrt_assign();
-  
-        return Real(0.5) / inSqrt;
-}
-
-Real sqrt2ndDer(Real input){
-  
-        Real inSqrt = Real(input);
-
-	inSqrt.sqrt_assign();
-  
-        return Real(-0.25) / (inSqrt * Real(input));
-}
-
-Real sqrt3rdDer(Real input){
-        Real inSqrt = Real(input);
-
-	inSqrt.sqrt_assign();
-
-	Real out = Real( 3.0 / 8.0 ) / (inSqrt * Real(input) * Real(input));
-  
-        return out;
-}
-
-Real sqrt4thDer(Real input){
-        Real inSqrt = Real(input);
-
-	inSqrt.sqrt_assign();
-  
-        return Real(- 15.0 / 16.0 ) / (inSqrt * Real(input) * Real(input) * Real(input));
-}
-
-Real getSqrtDerBound(int order, Interval intC){
-
-        Real bound = Real(0);
-
-        if(order == 3){ //3rd derivative is positive and decreasing so the max is the absolute value of intC.inf()
-
-	        double maxVal = fabs(sqrt3rdDer(Real(intC.inf())).getValue_RNDD());
-
-
-		bound = Real(maxVal);
-	}
-
-	else if(order == 4){ //4th derivative is (negative and) increasing so the max is the absolute value of intC.inf()
-	        double maxVal = fabs(sqrt4thDer(Real(intC.inf())).getValue_RNDD());
-
-		bound = Real(maxVal);
-
-	}
-
-	return bound;
-
-}
-
-Real divide(Real input){
-  
-        return Real(1) / input;
-}
-
-Real div1stDer(Real input){
-  
-        return Real(-1) / (input * input);
-}
-
-Real div2ndDer(Real input){
-  
-        return Real(2) / (input * input * input);
-}
-
-Real div3rdDer(Real input){
-  
-        return Real(-6) / (input * input * input * input);
-}
-
-Real div4thDer(Real input){
-  
-        return Real(24) / (input * input * input * input * input);
-}
-
-Real div5thDer(Real input){
-  
-        return Real(-120) / (input * input * input * input * input * input);
-}
-
-Real getDivDerBound(int order, Interval intC){
-
-        Real bound = Real(0);
-
-        if(order == 3){
-	        //3rd derivative is negative and decreasing for negative numbers
-	        if (intC.sup() < 0){
-		        double maxVal = fabs(div3rdDer(Real(intC.sup())).getValue_RNDD());
-
-			bound = Real(maxVal);
-		}
-		//3rd derivative is negative and increasing for positive numbers
-		else if (intC.inf() > 0){
-		        double maxVal = fabs(div3rdDer(Real(intC.inf())).getValue_RNDD());
-
-			bound = Real(maxVal);
-		}
-	}
-
-	else if(order == 4){
-	        //4th derivative is negative and decreasing for negative numbers
-	        if (intC.sup() < 0){
-		        double maxVal = fabs(div4thDer(Real(intC.sup())).getValue_RNDD());
-
-			bound = Real(maxVal);
-		}
-		//4th derivative is positive and decreasing for positive numbers
-		else if (intC.inf() > 0){
-		        double maxVal = fabs(div4thDer(Real(intC.inf())).getValue_RNDD());
-
-			bound = Real(maxVal);
-		}
-	}
-
-	else if(order == 5){
-	        //5th derivative is negative and decreasing for negative numbers
-	        if (intC.sup() < 0){
-		        double maxVal = fabs(div5thDer(Real(intC.sup())).getValue_RNDD());
-
-			bound = Real(maxVal);
-		}
-		//5th derivative is negative and increasing for positive numbers
-		else if (intC.inf() > 0){
-		        double maxVal = fabs(div5thDer(Real(intC.inf())).getValue_RNDD());
-
-			bound = Real(maxVal);
-		}
-	}
-
-	return bound;
-
-}
-
-Real cosine(Real input){
-
-        Real out = Real(input);
-
-	out.cos_assign();
-  
-        return out;
-}
-
-Real cos1stDer(Real input){
-
-        Real out = Real(input);
-
-	out.sin_assign();
-  
-        return Real(-1.0) * out;
-}
-
-Real cos2ndDer(Real input){
-
-        Real out = Real(input);
-
-	out.cos_assign();
-  
-        return Real(-1.0) * out;
-}
-
-Real cos3rdDer(Real input){
-
-        Real out = Real(input);
-
-	out.sin_assign();
-  
-        return out;
-}
-
-Real cos4thDer(Real input){
-
-        Real out = Real(input);
-
-	out.cos_assign();
-  
-        return out;
-}
-
-Real getCosDerBound(int order, Interval intC){
-
-        Real bound = Real(1);
-
-        if(order == 3){ //derivative is sin(x)
-
-	        if(intC.sup() - intC.inf() < M_PI){
-		        int pio2Mult = ceil((intC.inf() + M_PI/2) / M_PI);
-
-			double rem = pio2Mult * M_PI - intC.inf() - M_PI/2;
-
-			//printf("rem: %f\n", rem);
-
-			if (intC.sup() - intC.inf() < rem){
-			        double maxVal = fabs(cos3rdDer(Real(intC.inf())).getValue_RNDD());
-
-				if (fabs(cos3rdDer(Real(intC.sup())).getValue_RNDD()) > maxVal){
-
-				        maxVal = fabs(cos3rdDer(Real(intC.sup())).getValue_RNDD());
-					
-				}
-
-				bound = Real(maxVal);
-			}
-		}
-
-	}
-
-	else if(order == 4){ //derivative is cos(x)
-	        if(intC.sup() - intC.inf() < M_PI){
-		        int pio2Mult = ceil(intC.inf() / M_PI);
-
-			double rem = pio2Mult * M_PI - intC.inf();
-
-			if (intC.sup() - intC.inf() < rem){
-			        double maxVal = fabs(cos4thDer(Real(intC.inf())).getValue_RNDD());
-
-				if (fabs(cos4thDer(Real(intC.sup())).getValue_RNDD()) > maxVal){
-
-				        maxVal = fabs(cos4thDer(Real(intC.sup())).getValue_RNDD());
-					
-				}
-
-				bound = Real(maxVal);
-			}
-		}
-	}
-
-	return bound;
-
-}
-
-Real sine(Real input){
-
-        Real out = Real(input);
-
-	out.sin_assign();
-  
-        return out;
-}
-
-Real sin1stDer(Real input){
-
-        Real out = Real(input);
-
-	out.cos_assign();
-  
-        return out;
-}
-
-Real sin2ndDer(Real input){
-
-        Real out = Real(input);
-
-	out.sin_assign();
-  
-        return Real(-1.0) * out;
-}
-
-Real sin3rdDer(Real input){
-
-        Real out = Real(input);
-
-	out.cos_assign();
-  
-        return Real(-1.0) * out;
-}
-
-Real sin4thDer(Real input){
-
-        Real out = Real(input);
-
-	out.sin_assign();
-  
-        return out;
-}
-
-Real getSinDerBound(int order, Interval intC){
-
-        Real bound = Real(1);
-
-        if(order == 4){ //derivative is sin(x)
-
-	        if(intC.sup() - intC.inf() < M_PI){
-		        int pio2Mult = ceil((intC.inf() + M_PI/2) / M_PI);
-
-			double rem = pio2Mult * M_PI - intC.inf() - M_PI/2;
-
-			//printf("rem: %f\n", rem);
-
-			if (intC.sup() - intC.inf() < rem){
-			        double maxVal = fabs(cos3rdDer(Real(intC.inf())).getValue_RNDD());
-
-				if (fabs(cos3rdDer(Real(intC.sup())).getValue_RNDD()) > maxVal){
-
-				        maxVal = fabs(cos3rdDer(Real(intC.sup())).getValue_RNDD());
-					
-				}
-
-				bound = Real(maxVal);
-			}
-		}
-
-	}
-
-	else if(order == 3){ //derivative is -cos(x)
-	        if(intC.sup() - intC.inf() < M_PI){
-		        int pio2Mult = ceil(intC.inf() / M_PI);
-
-			double rem = pio2Mult * M_PI - intC.inf();
-
-			if (intC.sup() - intC.inf() < rem){
-			        double maxVal = fabs(cos4thDer(Real(intC.inf())).getValue_RNDD());
-
-				if (fabs(cos4thDer(Real(intC.sup())).getValue_RNDD()) > maxVal){
-
-				        maxVal = fabs(cos4thDer(Real(intC.sup())).getValue_RNDD());
-					
-				}
-
-				bound = Real(maxVal);
-			}
-		}
-	}
-
-	return bound;
-
-}
-
-Real sec(Real input){
-        Real out = Real(input);
-	
-	out.cos_assign();
-
-	Real one = Real(1);
-	
-        return one / out;
-}
-
-Real sec1stDer(Real input){
-        return sec(input) * tan(input);
-}
-
-Real sec2ndDer(Real input){
-        //return sec(input) * pow(tan(input), 2) + pow(sec(input), 3);
-        return sec(input) * tan(input) * tan(input) + sec(input) * sec(input) * sec(input);
-}
-
-Real sec3rdDer(Real input){
-        //return sec(input) * pow(tan(input), 3) + 5 * pow(sec(input), 3) * tan(input);
-        return sec(input) * tan(input) * tan(input) * tan(input) + Real(5) * sec(input) * sec(input) * sec(input) * tan(input);
-}
-
-Real sec4thDer(Real input){
-        //return sec(input) * pow(tan(input), 4) + 18 * pow(sec(input), 3) * pow(tan(input), 2) + 5 * pow(sec(input), 5);
-	return sec(input) * tan(input) * tan(input) * tan(input) * tan(input) +
-	  Real(18) * sec(input) * sec(input) * sec(input) * tan(input) * tan(input) +
-	  Real(5) * sec(input) * sec(input) * sec(input) * sec(input) * sec(input);
-}
-
-Real sec5thDer(Real input){
-	return sec(input) * tan(input) * tan(input) * tan(input) * tan(input) * tan(input) +
-	  Real(58) * sec(input) * sec(input) * sec(input) * tan(input) * tan(input) * tan(input) +
-	  Real(61) * sec(input) * sec(input) * sec(input) * sec(input) * sec(input) * tan(input);
-}
-
-Real getSecDerBound(Interval intC, int order){
-
-        Real derBound;
-	if (intC.inf() > -M_PI/2 && intC.sup() < M_PI/2){
-
-	        if (order == 5){
-		        derBound = sec5thDer(intC.sup());
-			
-			if (Real(-1) * sec5thDer(intC.inf()) > derBound)
-			        derBound = Real(-1) * sec5thDer(intC.inf());
-		}
-	  
-	        if (order == 4){
-		        derBound = sec4thDer(intC.sup());
-			
-			if (sec4thDer(intC.inf()) > derBound)
-			        derBound = sec4thDer(intC.inf());
-		}
-
-	        if (order == 3){
-		        derBound = sec3rdDer(intC.sup());
-			
-			if (Real(-1) * sec3rdDer(intC.inf()) > derBound)
-			        derBound = Real(-1) * sec3rdDer(intC.inf());
-		}	
-	}
-	else if (intC.inf() > M_PI/2 && intC.sup() <= M_PI){
-	        if (order == 5)
-		        derBound = sec5thDer(intC.inf());
-	  
-	        if (order == 4)
-		        derBound = Real(-1) * sec4thDer(intC.inf());
-
-		if (order == 3)
-		        derBound = sec3rdDer(intC.inf());
-	}
-	else if (intC.inf() >= -M_PI && intC.sup() < -M_PI/2){
-	        if (order == 5)
-		        derBound = Real(-1) * sec5thDer(intC.sup());
-	  
-	        if (order == 4)
-		        derBound = Real(-1) * sec4thDer(intC.sup());
-
-		if (order == 3)		  
-		        derBound = Real(-1) * sec3rdDer(intC.sup());
-	}
-	else{
-	        printf("Uncertainty too large. Please try decreasing the initial set size.\n");
-		exit(-1);
-	}
-
-	return derBound;
-}
-//End code added by Rado
 
 // hybrid reachability
 int HybridSystem::reach_hybrid(std::list<std::list<TaylorModelVec> > & flowpipes, std::list<std::list<std::vector<Interval> > > & domains,
@@ -9092,6 +7625,9 @@ int HybridSystem::reach_hybrid(std::list<std::list<TaylorModelVec> > & flowpipes
 	std::list<int> jumpsExecutedQueue;
 	std::list<bool> contractedQueue;
 
+	//Code added by Rado to keep track of different paths
+	std::list<int> branchIdQueue;
+
 	Interval intZero;
 	int rangeDim = initialSet.tmv.tms.size();
 
@@ -9100,6 +7636,13 @@ int HybridSystem::reach_hybrid(std::list<std::list<TaylorModelVec> > & flowpipes
 	timePassedQueue.push_back(0);
 	jumpsExecutedQueue.push_back(0);
 	contractedQueue.push_back(false);
+
+	//Code added by Rado
+	branchIdQueue.push_back(1);
+	dnn::totalNumBranches = 1;
+	dnn::dnn_runtime = 0;
+	struct timeval beginNN;
+	struct timeval endNN;
 
 	// mode trace
 	std::list<TreeNode *> nodeQueue;
@@ -9138,6 +7681,7 @@ int HybridSystem::reach_hybrid(std::list<std::list<TaylorModelVec> > & flowpipes
 		vec_tmv_Psi_table.push_back(vec_tmv_empty);
 	}
 
+
 	for(; modeQueue.size() != 0;)
 	{
 		int initMode = modeQueue.front();
@@ -9148,6 +7692,9 @@ int HybridSystem::reach_hybrid(std::list<std::list<TaylorModelVec> > & flowpipes
 
 		TreeNode *node = nodeQueue.front();
 
+		//Code added by Rado
+		dnn::curBranchId = branchIdQueue.front();
+
 		modeQueue.pop_front();
 		flowpipeQueue.pop_front();
 		timePassedQueue.pop_front();
@@ -9156,6 +7703,8 @@ int HybridSystem::reach_hybrid(std::list<std::list<TaylorModelVec> > & flowpipes
 
 		nodeQueue.pop_front();
 
+		//Code added by Rado
+		branchIdQueue.pop_front();
 
 		std::list<TaylorModelVec> mode_flowpipes;
 		std::list<std::vector<Interval> > mode_domains;
@@ -9365,21 +7914,22 @@ int HybridSystem::reach_hybrid(std::list<std::list<TaylorModelVec> > & flowpipes
 			case MULTI:
 				if(bAdaptiveSteps)
 				{
-					result = reach_continuous_high_degree(mode_flowpipes, mode_domains, mode_flowpipes_safety, mode_flowpipes_contracted,
+				        result = reach_continuous_high_degree(mode_flowpipes, mode_domains, mode_flowpipes_safety, mode_flowpipes_contracted,
 							num_of_flowpipes, initMode, initFp, step, miniStep, time-timePassed, *porders, globalMaxOrder, precondition, *pestimation, bPrint, stateVarNames, invariant_boundary_intersected, modeNames, cutoff_threshold,
 							unsafeSet[initMode], bSafetyChecking, bPlot, bDump);
 				}
 				else if(bAdaptiveOrders)
 				{
-					result = reach_continuous_high_degree(mode_flowpipes, mode_domains, mode_flowpipes_safety, mode_flowpipes_contracted,
+				        result = reach_continuous_high_degree(mode_flowpipes, mode_domains, mode_flowpipes_safety, mode_flowpipes_contracted,
 							num_of_flowpipes, initMode, initFp, step, time-timePassed, *porders, *pmaxOrders, globalMaxOrder, precondition, *pestimation, bPrint, stateVarNames, invariant_boundary_intersected, modeNames, cutoff_threshold,
 							unsafeSet[initMode], bSafetyChecking, bPlot, bDump);
 				}
 				else
 				{
-					result = reach_continuous_high_degree(mode_flowpipes, mode_domains, mode_flowpipes_safety, mode_flowpipes_contracted,
+				        result = reach_continuous_high_degree(mode_flowpipes, mode_domains, mode_flowpipes_safety, mode_flowpipes_contracted,
 							num_of_flowpipes, initMode, initFp, step, time-timePassed, *porders, globalMaxOrder, precondition, *pestimation, bPrint, stateVarNames, invariant_boundary_intersected, modeNames, cutoff_threshold,
 							unsafeSet[initMode], bSafetyChecking, bPlot, bDump);
+				    
 				}
 				break;
 			}
@@ -9492,7 +8042,6 @@ int HybridSystem::reach_hybrid(std::list<std::list<TaylorModelVec> > & flowpipes
 
 		//Code added by Rado
 		int numBranches = 0;
-		int kStep = 0;
 		
 		// overapproximate the intersection for each jump
 		for(int i=0; i<transitions[initMode].size(); ++i)
@@ -9509,6 +8058,8 @@ int HybridSystem::reach_hybrid(std::list<std::list<TaylorModelVec> > & flowpipes
 				printf("Dealing with the jump from %s to %s ...\n", modeNames[initMode].c_str(), modeNames[transitions[initMode][i].targetID].c_str());
 				//Code added by Rado
 				printf("jumps = %d\n", jumpsExecuted);
+				printf("branch id: %d\n", dnn::curBranchId);
+				//End of code added by Rado
 			}
 
 			// collect the intersected flowpipes
@@ -9525,22 +8076,11 @@ int HybridSystem::reach_hybrid(std::list<std::list<TaylorModelVec> > & flowpipes
 
 			for(; tmvIter!=mode_flowpipes.end(); ++tmvIter, ++doIter, ++safetyIter, ++contractedIter)
 			{
-
 				TaylorModelVec tmvIntersection = *tmvIter;
 				std::vector<Interval> doIntersection = *doIter;
 
-				//Rado, maybe here
-				// std::string dom;
-			        // doIntersection[1].toString(dom);
-				
-				// std::cout << "domain: " << dom << "\n";
-  
-				// Interval intC;
-			        // tmvIntersection.tms[1].intEval(intC, doIntersection);
-				
-				// printf("eval: [%f, %f]\n", intC.inf(), intC.sup());
-
 				std::vector<bool> local_boundary_intersected;
+
 				int type = contract_interval_arithmetic(tmvIntersection, doIntersection, transitions[initMode][i].guard, local_boundary_intersected, cutoff_threshold);
 
 				if(type >= 0 && aggregType[initMode][i] == PARA_AGGREG)
@@ -9560,7 +8100,6 @@ int HybridSystem::reach_hybrid(std::list<std::list<TaylorModelVec> > & flowpipes
 							}
 						}
 					}
-
 				}
 
 				if(type != -1)
@@ -9587,7 +8126,6 @@ int HybridSystem::reach_hybrid(std::list<std::list<TaylorModelVec> > & flowpipes
 					{
 						mode_contracted = true;
 					}
-
 				}
 				else
 				{
@@ -9609,7 +8147,7 @@ int HybridSystem::reach_hybrid(std::list<std::list<TaylorModelVec> > & flowpipes
 			if(intersected_flowpipes.size() == 1)
 			{
 //				printf("Only one interseted flowpipe.\n");
-			 
+
 				TaylorModelVec tmvAggregation;
 				std::vector<Interval> doAggregation = intersected_domains[0];
 				Flowpipe fpAggregation;
@@ -9618,14 +8156,15 @@ int HybridSystem::reach_hybrid(std::list<std::list<TaylorModelVec> > & flowpipes
 				construct_step_exp_table(step_exp_table, doAggregation[0], (globalMaxOrder+1)*2);
 				intersected_flowpipes[0].evaluate_t(tmvAggregation, step_exp_table);
 
-				//Rado, this is the reset map!
 				//Code added by Rado
-				numBranches++;
+				//This is the reset map!
 				
 				std::vector<std::string> realVarNames;
 				Variables realStateVars;
 				realVarNames.push_back("local_t");
 				realStateVars.declareVar("local_t");
+
+				Flowpipe tempSaveFp;
 
 				TaylorModelVec tempTMV = transitions[initMode][i].resetMap.tmvReset;
 
@@ -9635,400 +8174,23 @@ int HybridSystem::reach_hybrid(std::list<std::list<TaylorModelVec> > & flowpipes
 					realStateVars.declareVar(stateVarNames[varInd]);
 				}
 
+				//confusingly, this is the next mode name
 				std::string modeName = modeNames[transitions[initMode][i].targetID];
+				
+				std::string curModeName = modeNames[initMode];
+				int numVars = realVarNames.size();
 
-				//This code just computes the value of k so it can be written down later on
-				//Interval intK;
-				//tmvAggregation.tms[9].intEval(intK, doAggregation);
-				//kStep = round(intK.inf());
+				//quick test				  
+				// for(int varInd = 0; varInd < transitions[initMode][i].resetMap.tmvReset.tms.size(); varInd ++){
 
-				//quick test
-				if(!strncmp(modeName.c_str(), "preprint", strlen("preprint"))) {  
-				  
-				        for(int varInd = 0; varInd < transitions[initMode][i].resetMap.tmvReset.tms.size(); varInd ++){
+				//         Interval intC;
 
-					        Interval intC;
+				// 	tmvAggregation.tms[varInd].intEval(intC, doAggregation);
 
-						tmvAggregation.tms[varInd].intEval(intC, doAggregation);
-
-						printf("%s bounds before linear: [%13.10f, %13.10f]\n", stateVarNames[varInd].c_str(), intC.inf(), intC.sup());
-											
-					}
-
-				}
-
-				int fIndex = 0;
-				for(int varInd = 0; varInd < transitions[initMode][i].resetMap.tmvReset.tms.size(); varInd ++){
-				  
-					if(strncmp(stateVarNames[varInd].c_str(), "_f", strlen("_f"))) {
-						continue;
-					}
-
-					fIndex++;
-
-					if(modeName.size() <= 5)
-						break;
-				  
-				  	if(strncmp(modeName.c_str(), "_sig", strlen("_sig")) &&
-					   strncmp(modeName.c_str(), "_tanh", strlen("_tanh")) &&
-					   strncmp(modeName.c_str(), "_relu", strlen("_relu")) &&
-					   strncmp(modeName.c_str(), "_swish", strlen("_swish"))) {
-						   break;
-					   }
-				  
-				        //std::string printing;
-
-					Polynomial exp = transitions[initMode][i].resetMap.tmvReset.tms[varInd].expansion;
-					Interval rem = transitions[initMode][i].resetMap.tmvReset.tms[varInd].remainder;
-
-					// exp.toString(printing, realVarNames);
-
-				        // printf("%s reset before: %s\n", stateVarNames[varInd].c_str(), printing.c_str());
-					// printf("remainder before: [%f, %f]\n", rem.inf(), rem.sup());
-
-					//I'm keeping the intC name, although c states are not used anymore
-					Interval intC;
-
-					tmvAggregation.tms[varInd].intEval(intC, doAggregation);
-
+				// 	printf("%s bounds before reset: [%13.10f, %13.10f]\n", stateVarNames[varInd].c_str(), intC.inf(), intC.sup());
+				// 	printf("%s remainder before reset: [%13.10f, %13.10f]\n", stateVarNames[varInd].c_str(), tmvAggregation.tms[varInd].remainder.inf(), tmvAggregation.tms[varInd].remainder.sup());
 					
-					Real midPoint = Real(intC.midpoint());
-
-					//printf("%s bounds: [%13.10f, %13.10f]\n", stateVarNames[varInd].c_str(), intC.inf(), intC.sup());
-
-					Real apprPoint;
-				        Real coef1, coef2, coef3, coef4, coef5;
-				        Real derBound, maxDev;
-				        Real fact;
-				        Real remainder;
-					std::string newReset;
-					
-					if(!strncmp(modeName.c_str(), "_tanh", strlen("_tanh"))){
-
-					        apprPoint = tanh(midPoint);
-
-						//NB: This assumes a 3rd order TS approximation
-						coef1 = tanhDer(1, midPoint);
-						coef2 = tanhDer(2, midPoint)/2;
-						coef3 = tanhDer(3, midPoint)/6;
-						coef4 = tanhDer(4, midPoint)/24;
-
-						derBound = getTanh3rdDerBound(intC);
-
-						maxDev = Real(intC.sup()) - midPoint;
-						if (midPoint - Real(intC.inf()) > maxDev){
-						        maxDev = midPoint - Real(intC.inf());
-						}
-						
-						fact = Real(6);					       
-						maxDev.pow_assign(3);
-						remainder = (derBound * maxDev) / fact;
-
-						Interval apprInt = Interval(apprPoint);
-
-						Interval deg1Int = Interval(coef1);
-						Interval deg2Int = Interval(coef2);
-						Interval deg3Int = Interval(coef3);
-						Interval deg4Int = Interval(coef4);
-
-						std::vector<int> deg1(stateVarNames.size() + 1, 0);
-						deg1[varInd + 1] = 1;
-						std::vector<int> deg2(stateVarNames.size() + 1, 0);
-						deg2[varInd + 1] = 2;
-						std::vector<int> deg3(stateVarNames.size() + 1, 0);
-						deg3[varInd + 1] = 3;
-						std::vector<int> deg4(stateVarNames.size() + 1, 0);
-						deg4[varInd + 1] = 4;
-						
-						Polynomial deg0Poly = Polynomial(Monomial(apprInt, doAggregation.size()));
-						
-						Polynomial deg1Poly = Polynomial(Monomial(Interval(Real(-1) * coef1 * midPoint), doAggregation.size())) +
-						  Polynomial(Monomial(deg1Int, deg1));
-
-						Polynomial deg2Poly = Polynomial(Monomial(Interval(coef2 * midPoint * midPoint), doAggregation.size())) -
-						  Polynomial(Monomial(Interval(Real(2) * coef2 * midPoint), deg1)) +
-						  Polynomial(Monomial(deg2Int, deg2));
-						
-						exp = deg0Poly + deg1Poly + deg2Poly;
-						remainder.to_sym_int(rem);
-
-						//if uncertainty too large, use a 3rd order approximation
-						if (rem.width() > 0.00001){
-						        fact = 24;
-							maxDev = Real(intC.sup()) - midPoint;
-							maxDev.pow_assign(4);
-							derBound = getTanh4thDerBound(intC);
-						
-							remainder = (derBound * maxDev) / fact;
-							remainder.to_sym_int(rem);
-
-							Polynomial deg3Poly = Polynomial(Monomial(Interval(Real(-1) * coef3 * midPoint * midPoint * midPoint),
-												  doAggregation.size())) +
-							  Polynomial(Monomial(Interval(Real(3) * coef3 * midPoint * midPoint), deg1)) -
-							  Polynomial(Monomial(Interval(Real(3) * coef3 * midPoint), deg2)) +
-							  Polynomial(Monomial(deg3Int, deg3));
-						
-							exp += deg3Poly;
-						}				
-					}
-
-					else if(!strncmp(modeName.c_str(), "_sig", strlen("_sig"))) {
-
-					        apprPoint = sigmoid(midPoint);
-
-						//NB: This assumes a 3rd order TS approximation
-						coef1 = sigDer(1, midPoint);
-						coef2 = sigDer(2, midPoint)/2;
-						coef3 = sigDer(3, midPoint)/6;						
-
-						derBound = getSig3rdDerBound(intC);
-
-						maxDev = Real(intC.sup()) - midPoint;
-						if (midPoint - Real(intC.inf()) > maxDev){
-						        maxDev = midPoint - Real(intC.inf());
-						}
-						
-						fact = Real(6);					       
-						maxDev.pow_assign(3);
-						remainder = (derBound * maxDev) / fact;
-
-						Interval apprInt = Interval(apprPoint);
-
-						Interval deg1Int = Interval(coef1);
-						Interval deg2Int = Interval(coef2);
-						Interval deg3Int = Interval(coef3);
-
-						std::vector<int> deg1(stateVarNames.size() + 1, 0);
-						deg1[varInd + 1] = 1;
-						std::vector<int> deg2(stateVarNames.size() + 1, 0);
-						deg2[varInd + 1] = 2;
-						std::vector<int> deg3(stateVarNames.size() + 1, 0);
-						deg3[varInd + 1] = 3;
-						
-						Polynomial deg0Poly = Polynomial(Monomial(apprInt, doAggregation.size()));
-						
-						Polynomial deg1Poly = Polynomial(Monomial(Interval(Real(-1) * coef1 * midPoint), doAggregation.size())) +
-						  Polynomial(Monomial(deg1Int, deg1));
-
-						Polynomial deg2Poly = Polynomial(Monomial(Interval(coef2 * midPoint * midPoint), doAggregation.size())) -
-						  Polynomial(Monomial(Interval(Real(2) * coef2 * midPoint), deg1)) +
-						  Polynomial(Monomial(deg2Int, deg2));
-						
-						exp = deg0Poly + deg1Poly + deg2Poly;
-						remainder.to_sym_int(rem);
-
-						//if uncertainty too large, use a 3rd order approximation
-						if (rem.width() > 0.00001){
-						        fact = 24;
-							maxDev = Real(intC.sup()) - midPoint;
-							maxDev.pow_assign(4);
-							derBound = getSig4thDerBound(intC);
-						
-							remainder = (derBound * maxDev) / fact;
-							remainder.to_sym_int(rem);
-
-							Polynomial deg3Poly = Polynomial(Monomial(Interval(Real(-1) * coef3 * midPoint * midPoint * midPoint),
-												  doAggregation.size())) +
-							  Polynomial(Monomial(Interval(Real(3) * coef3 * midPoint * midPoint), deg1)) -
-							  Polynomial(Monomial(Interval(Real(3) * coef3 * midPoint), deg2)) +
-							  Polynomial(Monomial(deg3Int, deg3));
-						
-							exp += deg3Poly;
-						}
-					}
-
-					else if(!strncmp(modeName.c_str(), "_swish", strlen("_swish"))) {
-
-					        apprPoint = swish(midPoint);
-						
-						//NB: This assumes a 3rd order TS approximation
-
-					        coef1 = swish1stDer(midPoint);
-						coef2 = swish2ndDer(midPoint)/2;
-						coef3 = swish3rdDer(midPoint)/6;
-						
-
-						derBound = getSwish3rdDerBound(intC);
-
-						maxDev = Real(intC.sup()) - midPoint;
-						if (midPoint - Real(intC.inf()) > maxDev){
-						        maxDev = midPoint - Real(intC.inf());
-						}
-						
-						fact = Real(6);					       
-						maxDev.pow_assign(3);
-						remainder = (derBound * maxDev) / fact;
-
-						Interval apprInt = Interval(apprPoint);
-
-						Interval deg1Int = Interval(coef1);
-						Interval deg2Int = Interval(coef2);
-						Interval deg3Int = Interval(coef3);
-
-						std::vector<int> deg1(stateVarNames.size() + 1, 0);
-						deg1[varInd + 1] = 1;
-						std::vector<int> deg2(stateVarNames.size() + 1, 0);
-						deg2[varInd + 1] = 2;
-						std::vector<int> deg3(stateVarNames.size() + 1, 0);
-						deg3[varInd + 1] = 3;
-						
-						Polynomial deg0Poly = Polynomial(Monomial(apprInt, doAggregation.size()));
-						
-						Polynomial deg1Poly = Polynomial(Monomial(Interval(Real(-1) * coef1 * midPoint), doAggregation.size())) +
-						  Polynomial(Monomial(deg1Int, deg1));
-
-						Polynomial deg2Poly = Polynomial(Monomial(Interval(coef2 * midPoint * midPoint), doAggregation.size())) -
-						  Polynomial(Monomial(Interval(Real(2) * coef2 * midPoint), deg1)) +
-						  Polynomial(Monomial(deg2Int, deg2));
-						
-						exp = deg0Poly + deg1Poly + deg2Poly;
-						remainder.to_sym_int(rem);
-
-						//if uncertainty too large, use a 3rd order approximation
-						if (rem.width() > 0.00001){
-						        fact = 24;
-							maxDev = Real(intC.sup()) - midPoint;
-							maxDev.pow_assign(4);
-
-							derBound = getSwish4thDerBound(intC);
-						
-							remainder = (derBound * maxDev) / fact;
-							remainder.to_sym_int(rem);
-
-							Polynomial deg3Poly = Polynomial(Monomial(Interval(Real(-1) * coef3 * midPoint * midPoint * midPoint),
-												  doAggregation.size())) +
-							  Polynomial(Monomial(Interval(Real(3) * coef3 * midPoint * midPoint), deg1)) -
-							  Polynomial(Monomial(Interval(Real(3) * coef3 * midPoint), deg2)) +
-							  Polynomial(Monomial(deg3Int, deg3));
-						
-							exp += deg3Poly;
-						}
-					}										
-
-					//ReLU all in 0 area
-					else if(!strncmp(modeName.c_str(), "_relu", strlen("_relu")) && intC.sup() < 0){
-
-					        Interval zeroInt = Interval(0.0, 0.0);
-						
-					        exp = Polynomial(Monomial(zeroInt, doAggregation.size()));
-						rem = zeroInt;
-					}
-
-					//ReLU all in positive area
-					else if(!strncmp(modeName.c_str(), "_relu", strlen("_relu")) && intC.inf() > 0){
-
-					        std::vector<int> deg1(stateVarNames.size() + 1, 0);
-						deg1[varInd + 1] = 1;
-
-						Polynomial deg1Poly = Polynomial(Monomial(Interval(1.0, 1.0), deg1));
-
-					        exp = deg1Poly;
-						rem = Interval(0.0, 0.0);
-
-					}					
-					
-					else if(!strncmp(modeName.c_str(), "_relu", strlen("_relu"))){
-
-					        apprPoint = swishHundred(midPoint);
-						
-						//NB: This assumes a 3rd order TS approximation
-
-					        coef1 = swishHundred1stDer(midPoint);
-						coef2 = swishHundred2ndDer(midPoint)/2;
-						coef3 = swishHundred3rdDer(midPoint)/6;
-						
-						derBound = getSwishHundred3rdDerBound(intC);
-
-						maxDev = Real(intC.sup()) - midPoint;
-						if (midPoint - Real(intC.inf()) > maxDev){
-						        maxDev = midPoint - Real(intC.inf());
-						}
-						
-						fact = Real(6);					       
-						maxDev.pow_assign(3);
-						remainder = (derBound * maxDev) / fact;
-
-						Interval apprInt = Interval(apprPoint);
-
-						Interval deg1Int = Interval(coef1);
-						Interval deg2Int = Interval(coef2);
-						Interval deg3Int = Interval(coef3);
-
-						std::vector<int> deg1(stateVarNames.size() + 1, 0);
-						deg1[varInd + 1] = 1;
-						std::vector<int> deg2(stateVarNames.size() + 1, 0);
-						deg2[varInd + 1] = 2;
-						std::vector<int> deg3(stateVarNames.size() + 1, 0);
-						deg3[varInd + 1] = 3;
-						
-						Polynomial deg0Poly = Polynomial(Monomial(apprInt, doAggregation.size()));
-						
-						Polynomial deg1Poly = Polynomial(Monomial(Interval(Real(-1) * coef1 * midPoint), doAggregation.size())) +
-						  Polynomial(Monomial(deg1Int, deg1));
-
-						Polynomial deg2Poly = Polynomial(Monomial(Interval(coef2 * midPoint * midPoint), doAggregation.size())) -
-						  Polynomial(Monomial(Interval(Real(2) * coef2 * midPoint), deg1)) +
-						  Polynomial(Monomial(deg2Int, deg2));
-						
-						exp = deg0Poly + deg1Poly + deg2Poly;
-						remainder.to_sym_int(rem);
-
-						//if uncertainty too large, use a 3rd order approximation
-						if (rem.width() > 0.00001){
-						        fact = 24;
-							maxDev = Real(intC.sup()) - midPoint;
-							maxDev.pow_assign(4);
-
-							derBound = getSwishHundred4thDerBound(intC);
-						
-							remainder = (derBound * maxDev) / fact;
-							remainder.to_sym_int(rem);
-
-							Polynomial deg3Poly = Polynomial(Monomial(Interval(Real(-1) * coef3 * midPoint * midPoint * midPoint),
-												  doAggregation.size())) +
-							  Polynomial(Monomial(Interval(Real(3) * coef3 * midPoint * midPoint), deg1)) -
-							  Polynomial(Monomial(Interval(Real(3) * coef3 * midPoint), deg2)) +
-							  Polynomial(Monomial(deg3Int, deg3));
-						
-							exp += deg3Poly;
-						}
-
-						//Add approximation error between ReLU and Swish
-						// exp += Polynomial(Monomial(Interval(0.0014, 0.0014), doAggregation.size()));
-						// rem += Interval(-0.0014, 0.0014);
-
-						//Add approximation error between ReLU and Swish
-
-						if (intC.inf() > -0.0127){
-						        double maxDer = -swishHundred(Real(intC.inf())).getValue_RNDD();
-
-							if(intC.sup() - swishHundred(Real(intC.sup())).getValue_RNDD() > maxDer){
-							        maxDer = intC.sup() - swishHundred(Real(intC.sup())).getValue_RNDD();
-							}
-
-							rem += Interval(0.0, maxDer);
-						}
-						else{						  
-						        rem += Interval(0.0, 0.0028);
-						}
-					}
-					
-					// printf("new reset: %s\n", newReset.c_str());
-
-					transitions[initMode][i].resetMap.tmvReset.tms[varInd].expansion = exp;
-					transitions[initMode][i].resetMap.tmvReset.tms[varInd].remainder = rem;
-
-					// std::string poly;
-					// exp.toString(poly, realVarNames);
-
-					// printf("reset: %s\n", poly.c_str());
-					// printf("remainder after: [%13.10f, %13.10f]\n", rem.inf(), rem.sup());
-
-					if(rem.width() > 1){
-					        printf("Uncertainty too large. Please decrease initial set size.\n");
-						exit(-1);
-					}
-				}
+				// }
 
 				//this case deals with division resets
 				if(!strncmp(modeName.c_str(), "_div_", strlen("_div_"))){
@@ -10036,10 +8198,10 @@ int HybridSystem::reach_hybrid(std::list<std::list<TaylorModelVec> > & flowpipes
 				        std::string varInd = "";
 
 					int curInd = 5;
-					
 					for(; modeName[curInd] != '_'; curInd++){
 					        varInd = varInd + modeName[curInd];
 					}
+
 					int varStoreInd = std::stoi(varInd);
 
 					varInd = "";
@@ -10048,161 +8210,18 @@ int HybridSystem::reach_hybrid(std::list<std::list<TaylorModelVec> > & flowpipes
 					        varInd = varInd + modeName[curInd];
 					}
 					int varDenInd = std::stoi(varInd);
-					std::string varDenName = stateVarNames[varDenInd];
 
-				        Polynomial exp;
-					Interval rem;
-				  
 				        //I'm keeping the intC name, although c states are not used anymore
 					Interval intC;
 					
 					tmvAggregation.tms[varDenInd].intEval(intC, doAggregation);
 					
-					//Real midPoint = (Real(intC.sup()) + Real(intC.inf()))/2;
-					Real midPoint = Real(intC.midpoint());
-
-					//printf("%s bounds: [%13.10f, %13.10f]\n", stateVarNames[varDenInd].c_str(), intC.inf(), intC.sup());
-
-				        Real apprPoint = divide(midPoint);
+					TaylorModel new_tm_reset;
+					div_reset(new_tm_reset, intC, varStoreInd, varDenInd, numVars);
 					
-					//NB: This assumes a 2nd order TS approximation
-				        Real coef1 = div1stDer(midPoint);
-				        Real coef2 = div2ndDer(midPoint)/2;
-				        Real coef3 = div3rdDer(midPoint)/6;
+					transitions[initMode][i].resetMap.tmvReset.tms[varStoreInd].expansion = new_tm_reset.expansion;
+					transitions[initMode][i].resetMap.tmvReset.tms[varStoreInd].remainder = new_tm_reset.remainder;
 
-				        Real derBound = getDivDerBound(3, intC);
-
-					Real maxDev = Real(intC.sup()) - midPoint;
-					if (midPoint - Real(intC.inf()) > maxDev){
-					        maxDev = midPoint - Real(intC.inf());
-					}
-
-					Real fact = 6;
-					maxDev.pow_assign(3);
-
-					
-					Real remainder = (derBound * maxDev) / fact;
-
-					Interval apprInt = Interval(apprPoint);
-
-					Interval deg1Int = Interval(coef1);
-					Interval deg2Int = Interval(coef2);
-					Interval deg3Int = Interval(coef3);
-
-					std::vector<int> deg1(stateVarNames.size() + 1, 0);
-					deg1[varDenInd + 1] = 1;
-					std::vector<int> deg2(stateVarNames.size() + 1, 0);
-					deg2[varDenInd + 1] = 2;
-					std::vector<int> deg3(stateVarNames.size() + 1, 0);
-					deg3[varDenInd + 1] = 3;
-
-					/*
-					  Poly approx. = apprPoint + coef1 * (x - midPoint) 
-					        + coef2 * x^2 - 2 * coef2 * x * midPoint + coef2 * midPoint^2
-					        + coef3 * x^3 - 3 * coef3 * x^2 * midpoint + 3 * coef3 * x * midPoint^2 - coef3 * midPoint^3
-					 */
-
-					Polynomial deg0Poly = Polynomial(Monomial(apprInt, doAggregation.size()));
-
-					Polynomial deg1Poly = Polynomial(Monomial(Interval(Real(-1) * coef1 * midPoint), doAggregation.size())) +
-					  Polynomial(Monomial(deg1Int, deg1));
-
-					Polynomial deg2Poly = Polynomial(Monomial(Interval(coef2 * midPoint * midPoint), doAggregation.size())) -
-					  Polynomial(Monomial(Interval(Real(2) * coef2 * midPoint), deg1)) +
-					  Polynomial(Monomial(deg2Int, deg2));
-					
-				        exp = deg0Poly + deg1Poly + deg2Poly;
-					remainder.to_sym_int(rem);
-
-					//if uncertainty too large, use a 3rd order approximation
-					if (rem.width() > 0.00001){
-
-					        if(Real(1000) > coef3){
-						        fact = 24;
-							maxDev = Real(intC.sup()) - midPoint;
-							maxDev.pow_assign(4);
-							derBound = getDivDerBound(4, intC);
-						
-							remainder = (derBound * maxDev) / fact;
-							remainder.to_sym_int(rem);
-							
-							Polynomial deg3Poly =
-							  Polynomial(Monomial(Interval(Real(-1) * coef3 * midPoint * midPoint * midPoint),
-									      doAggregation.size())) +
-							  Polynomial(Monomial(Interval(Real(3) * coef3 * midPoint * midPoint), deg1)) -
-							  Polynomial(Monomial(Interval(Real(3) * coef3 * midPoint), deg2)) +
-							  Polynomial(Monomial(deg3Int, deg3));
-							
-							exp += deg3Poly;
-						}
-					}
-
-					//if uncertainty too large, use a 4th order approximation
-					if (rem.width() > 0.00001){
-
-						
-						Real coef4 = div4thDer(midPoint)/24;
-
-						if(Real(10) > coef4){
-
-						        fact = 120;
-							maxDev = Real(intC.sup()) - midPoint;
-							maxDev.pow_assign(5);
-							derBound = getDivDerBound(5, intC);
-
-							std::vector<int> deg4(stateVarNames.size() + 1, 0);
-							deg4[varDenInd + 1] = 4;
-
-							remainder = (derBound * maxDev) / fact;
-							remainder.to_sym_int(rem);
-						
-						        Interval deg4Int = Interval(coef4);
-
-							Polynomial deg4Poly =
-							  Polynomial(Monomial(Interval(coef4 * midPoint * midPoint * midPoint * midPoint),
-											  doAggregation.size() - 1)) +
-							  Polynomial(Monomial(Interval(Real(-4) * coef4 * midPoint * midPoint * midPoint), deg1)) -
-							  Polynomial(Monomial(Interval(Real(6) * coef4 * midPoint * midPoint), deg2)) +
-							  Polynomial(Monomial(Interval(Real(-4) * coef4 * midPoint), deg3)) +
-							  Polynomial(Monomial(deg4Int, deg4));
-					        
-						
-							exp += deg4Poly;
-						}
-					}
-
-					//if uncertainty still too large, use worst-case bounds
-					if (rem.width() > 0.1){
-					        Real divSup = divide(Real(intC.inf()));
-						Real divInf = divide(Real(intC.sup()));
-
-						if (divSup > Real(0) && Real(0) > divInf){
-						        printf("Uncertainty too large. Please increase Taylor Model order.\n");
-							exit(-1);
-						}
-
-						//printf("upper bound: %f\n", secSup.getValue_RNDU());
-						//printf("lower bound: %f\n", secInf.getValue_RNDU());
-						  
-					        Interval divBounds = Interval(divInf, divSup);
-
-						exp = Polynomial(Monomial(divBounds, doAggregation.size() - 1));
-						rem = Interval(0.0, 0.0);
-					}
-
-					std::string poly;
-					exp.toString(poly, realVarNames);
-
-					//printf("reset: %s\n", poly.c_str());
-					//printf("remainder: [%13.10f, %13.10f]\n", rem.inf(), rem.sup());
-					
-					transitions[initMode][i].resetMap.tmvReset.tms[varStoreInd].expansion = exp;
-					transitions[initMode][i].resetMap.tmvReset.tms[varStoreInd].remainder = rem;
-
-					if(rem.width() > 1){
-					        printf("Uncertainty too large. Please increase Taylor Model order.\n");
-						exit(-1);
-					}					
 				}
 
 				
@@ -10223,237 +8242,34 @@ int HybridSystem::reach_hybrid(std::list<std::list<TaylorModelVec> > & flowpipes
 					        varInd = varInd + modeName[curInd];
 					}
 					int varDenInd = std::stoi(varInd);
-					std::string varDenName = stateVarNames[varDenInd];
-
-				        Polynomial exp;
-					Interval rem;
 				  
 				        //I'm keeping the intC name, although c states are not used anymore
 					Interval intC;
 					
-					tmvAggregation.tms[varDenInd].intEval(intC, doAggregation);
+					tmvAggregation.tms[varDenInd].intEval(intC, doAggregation);					
 
 					//This if-case deals with a Flow* issue where the angle bound is not correctly computed
-					if (invariants[initMode].size() > 1){
-					        Interval angleInv = invariants[initMode][1].B;
+					//NB Rado: do we need this??
+					// if (invariants[initMode].size() > 1){
+					//         Interval angleInv = invariants[initMode][1].B;
 
-						//NB: this assumes that this invariant is written as -angle <= PI/2
-						if(intC.sup() < 0 && -angleInv.sup() > intC.inf() && -angleInv.sup() < intC.sup()){
-						        intC.setInf(-angleInv.sup());
-						}
+					// 	//NB: this assumes that this invariant is written as -angle <= PI/2
+					// 	if(intC.sup() < 0 && -angleInv.sup() > intC.inf() && -angleInv.sup() < intC.sup()){
+					// 	        intC.setInf(-angleInv.sup());
+					// 	}
 
-						//NB: this assumes that this invariant is written as angle <= PI/2
-						if(intC.inf() > 0 && angleInv.sup() > intC.inf() && angleInv.sup() < intC.sup()){
-						        intC.setSup(angleInv.sup());
-						}						
+					// 	//NB: this assumes that this invariant is written as angle <= PI/2
+					// 	if(intC.inf() > 0 && angleInv.sup() > intC.inf() && angleInv.sup() < intC.sup()){
+					// 	        intC.setSup(angleInv.sup());
+					// 	} 
 
-					}
+					// }
 
-					
-					//Real midPoint = (Real(intC.sup()) + Real(intC.inf()))/2;
-					Real midPoint = Real(intC.midpoint());
+					TaylorModel new_tm_reset;
+					sec_reset(new_tm_reset, intC, varStoreInd, varDenInd, numVars, tmvAggregation, doAggregation);
 
-					//printf("%s bounds: [%13.10f, %13.10f]\n", stateVarNames[varDenInd].c_str(), intC.inf(), intC.sup());
-
-				        Real apprPoint = sec(midPoint);
-					
-					//NB: This assumes a 2nd order TS approximation
-				        Real coef1 = sec1stDer(midPoint);
-				        Real coef2 = sec2ndDer(midPoint)/2;
-				        Real coef3 = sec3rdDer(midPoint)/6;
-
-				        Real derBound = getSecDerBound(intC, 3);
-
-					Real maxDev = Real(intC.sup()) - midPoint;
-					if (midPoint - Real(intC.inf()) > maxDev){
-					        maxDev = midPoint - Real(intC.inf());
-					}
-
-					Real fact = 6;
-					maxDev.pow_assign(3);
-
-					
-					Real remainder = (derBound * maxDev) / fact;
-
-					Interval apprInt = Interval(apprPoint);
-
-					Interval deg1Int = Interval(coef1);
-					Interval deg2Int = Interval(coef2);
-					Interval deg3Int = Interval(coef3);
-
-					std::vector<int> deg1(stateVarNames.size() + 1, 0);
-					deg1[varDenInd + 1] = 1;
-					std::vector<int> deg2(stateVarNames.size() + 1, 0);
-					deg2[varDenInd + 1] = 2;
-					std::vector<int> deg3(stateVarNames.size() + 1, 0);
-					deg3[varDenInd + 1] = 3;
-
-					/*
-					  Poly approx. = apprPoint + coef1 * (x - midPoint) 
-					        + coef2 * x^2 - 2 * coef2 * x * midPoint + coef2 * midPoint^2
-					        + coef3 * x^3 - 3 * coef3 * x^2 * midpoint + 3 * coef3 * x * midPoint^2 - coef3 * midPoint^3
-					 */
-
-					Polynomial deg0Poly = Polynomial(Monomial(apprInt, doAggregation.size()));
-
-					Polynomial deg1Poly = Polynomial(Monomial(Interval(Real(-1) * coef1 * midPoint), doAggregation.size())) +
-					  Polynomial(Monomial(deg1Int, deg1));
-
-					Polynomial deg2Poly = Polynomial(Monomial(Interval(coef2 * midPoint * midPoint), doAggregation.size())) -
-					  Polynomial(Monomial(Interval(Real(2) * coef2 * midPoint), deg1)) +
-					  Polynomial(Monomial(deg2Int, deg2));
-					
-				        exp = deg0Poly + deg1Poly + deg2Poly;
-					remainder.to_sym_int(rem);
-
-					//if uncertainty too large, use a 3rd order approximation
-					if (rem.width() > 0.00001){
-
-					        if(Real(1000) > coef3){
-						        fact = 24;
-							maxDev = Real(intC.sup()) - midPoint;
-							maxDev.pow_assign(4);
-							derBound = getSecDerBound(intC, 4);
-						
-							remainder = (derBound * maxDev) / fact;
-							remainder.to_sym_int(rem);
-							
-							Polynomial deg3Poly =
-							  Polynomial(Monomial(Interval(Real(-1) * coef3 * midPoint * midPoint * midPoint),
-									      doAggregation.size())) +
-							  Polynomial(Monomial(Interval(Real(3) * coef3 * midPoint * midPoint), deg1)) -
-							  Polynomial(Monomial(Interval(Real(3) * coef3 * midPoint), deg2)) +
-							  Polynomial(Monomial(deg3Int, deg3));
-							
-							exp += deg3Poly;
-						}
-					}
-
-					//if uncertainty too large, use a 4th order approximation
-					if (rem.width() > 0.00001){
-
-						
-						Real coef4 = sec4thDer(midPoint)/24;
-
-						if(Real(10) > coef4){
-
-						        fact = 120;
-							maxDev = Real(intC.sup()) - midPoint;
-							maxDev.pow_assign(5);
-							derBound = getSecDerBound(intC, 5);					       
-
-							std::vector<int> deg4(stateVarNames.size() + 1, 0);
-							deg4[varDenInd + 1] = 4;
-
-							remainder = (derBound * maxDev) / fact;
-							remainder.to_sym_int(rem);
-						
-						        Interval deg4Int = Interval(coef4);
-
-							Polynomial deg4Poly =
-							  Polynomial(Monomial(Interval(coef4 * midPoint * midPoint * midPoint * midPoint),
-											  doAggregation.size() - 1)) +
-							  Polynomial(Monomial(Interval(Real(-4) * coef4 * midPoint * midPoint * midPoint), deg1)) -
-							  Polynomial(Monomial(Interval(Real(6) * coef4 * midPoint * midPoint), deg2)) +
-							  Polynomial(Monomial(Interval(Real(-4) * coef4 * midPoint), deg3)) +
-							  Polynomial(Monomial(deg4Int, deg4));
-					        
-						
-							exp += deg4Poly;
-						}
-					}
-
-					//if uncertainty still too large, use worst-case bounds
-					if (rem.width() > 0.1){
-					        Real secSup = sec(Real(intC.sup()));
-						Real secInf = sec(Real(intC.inf()));
-
-						//printf("upper bound: %f\n", secSup.getValue_RNDU());
-						//printf("lower bound: %f\n", secInf.getValue_RNDU());
-
-						Interval intDistS;
-						tmvAggregation.tms[1].intEval(intDistS, doAggregation);
-						Interval intDistF;
-						tmvAggregation.tms[2].intEval(intDistF, doAggregation);	
-						  
-					        Interval secBounds;
-
-						//NB: These hardcoded resets are specific to the F1/10 case study
-						double LIDAR_MAX_DISTANCE = 5;
-						double hallwayWidth = 1.5;
-
-					        if (intC.inf() > -M_PI/2 && intC.sup() <= 0){
-						        secBounds = Interval(secSup, secInf, 100);
-
-							if (secBounds.inf() * (hallwayWidth - intDistS.sup()) > LIDAR_MAX_DISTANCE &&
-							    secBounds.inf() * (hallwayWidth - intDistS.inf()) > LIDAR_MAX_DISTANCE &&
-							    hallwayWidth - intDistS.sup() > 0){
-							        secBounds.setInf((LIDAR_MAX_DISTANCE + 1) / std::min((hallwayWidth - intDistS.sup()), (hallwayWidth - intDistS.inf())));
-							}
-							if (secBounds.sup() * (hallwayWidth - intDistS.sup()) > LIDAR_MAX_DISTANCE &&
-							    secBounds.sup() * (hallwayWidth - intDistS.inf()) > LIDAR_MAX_DISTANCE &&
-							    hallwayWidth - intDistS.sup() > 0){
-							        secBounds.setSup((LIDAR_MAX_DISTANCE + 1) / std::min((hallwayWidth - intDistS.sup()), (hallwayWidth - intDistS.inf())));
-							}
-						}
-
-						else if(intC.inf() >= 0 && intC.sup() < M_PI/2){
-						        secBounds = Interval(secInf, secSup, 100);
-
-							if (secBounds.inf() * (hallwayWidth - intDistF.sup()) > LIDAR_MAX_DISTANCE &&
-							    secBounds.inf() * (hallwayWidth - intDistF.inf()) > LIDAR_MAX_DISTANCE &&
-							    hallwayWidth - intDistF.sup() > 0){
-							        secBounds.setInf((LIDAR_MAX_DISTANCE + 1) / std::min((hallwayWidth - intDistF.sup()), (hallwayWidth - intDistF.inf())));
-							}
-							if (secBounds.sup() * (hallwayWidth - intDistF.sup()) > LIDAR_MAX_DISTANCE &&
-							    secBounds.sup() * (hallwayWidth - intDistF.inf()) > LIDAR_MAX_DISTANCE &&
-							    hallwayWidth - intDistF.sup() > 0){
-							        secBounds.setSup((LIDAR_MAX_DISTANCE + 1) / std::min((hallwayWidth - intDistF.sup()), (hallwayWidth - intDistF.inf())));
-							}
-						}
-
-						else if(intC.inf() > -M_PI/2 && intC.sup() < M_PI/2){
-						        Real low = Real(1);
-							Real high = sec(Real(intC.sup()));
-
-							if(sec(Real(intC.inf())) > high) high = sec(Real(intC.inf()));
-
-							secBounds = Interval(low, high, 100);
-						}
-	
-						else if (intC.inf() > M_PI/2 && intC.sup() <= M_PI){
-						        secBounds = Interval(secInf, secSup, 100);
-						}
-						
-						else if (intC.inf() >= -M_PI && intC.sup() < -M_PI/2){
-	  
-						        secBounds = Interval(secSup, secInf, 100);							
-						}
-
-						else{
-						        printf("Uncertainty too large. Please try decreasing the initial set.\n");
-							exit(-1);
-						}					
-
-						//printf("stored bounds: [%f, %f]\n", secBounds.inf(), secBounds.sup());
-					  
-						exp = Polynomial(Monomial(secBounds, doAggregation.size() - 1));
-						rem = Interval(0.0, 0.0);
-					}
-
-					std::string poly;
-					exp.toString(poly, realVarNames);
-
-					//printf("reset: %s\n", poly.c_str());
-					//printf("remainder: [%13.10f, %13.10f]\n", rem.inf(), rem.sup());
-					
-					transitions[initMode][i].resetMap.tmvReset.tms[varStoreInd].expansion = exp;
-					transitions[initMode][i].resetMap.tmvReset.tms[varStoreInd].remainder = rem;
-
-					if(rem.width() > 1){
-					        printf("Uncertainty too large. Please increase Taylor Model order.\n");
-						exit(-1);
-					}					
+					transitions[initMode][i].resetMap.tmvReset.tms[varStoreInd].expansion = new_tm_reset.expansion;
+					transitions[initMode][i].resetMap.tmvReset.tms[varStoreInd].remainder = new_tm_reset.remainder;
 				}
 
 				//this case deals with arctan resets
@@ -10473,93 +8289,21 @@ int HybridSystem::reach_hybrid(std::list<std::list<TaylorModelVec> > & flowpipes
 					        varInd = varInd + modeName[curInd];
 					}
 					int varDenInd = std::stoi(varInd);
-					std::string varDenName = stateVarNames[varDenInd];
-
-				        Polynomial exp;
-					Interval rem;
 				  
 				        //I'm keeping the intC name, although c states are not used anymore
 					Interval intC;
 					
 					tmvAggregation.tms[varDenInd].intEval(intC, doAggregation);
+
+					TaylorModel new_tm_reset;
+					arc_reset(new_tm_reset, intC, varStoreInd, varDenInd, numVars);					
 					
-					Real midPoint = Real(intC.midpoint());
-
-					//printf("%s bounds: [%13.10f, %13.10f]\n", stateVarNames[varDenInd].c_str(), intC.inf(), intC.sup());
-
-				        Real apprPoint = arctan(intC.midpoint());
-
-
-					//NB: This assumes a 2nd order TS approximation
-				        Real coef1 = arctanCoef(1);
-				        Real coef2 = arctanCoef(2);
-				        Real coef3 = arctanCoef(3);
-
-					Real maxDev = Real(intC.sup()) - midPoint;
-					if (midPoint - Real(intC.inf()) > maxDev){
-					        maxDev = midPoint - Real(intC.inf());
-					}
-
-					Real remainder = getArcTanDerBound(maxDev.getValue_RNDD(), 3);
-
-					Interval apprInt = Interval(apprPoint);
-
-					Interval deg1Int = Interval(coef1);
-					Interval deg2Int = Interval(coef2);
-					Interval deg3Int = Interval(coef3);
-
-					std::vector<int> deg1(stateVarNames.size() + 1, 0);
-					deg1[varDenInd + 1] = 1;
-					std::vector<int> deg2(stateVarNames.size() + 1, 0);
-					deg2[varDenInd + 1] = 2;
-					std::vector<int> deg3(stateVarNames.size() + 1, 0);
-					deg3[varDenInd + 1] = 3;
-
-					Polynomial deg0Poly = Polynomial(Monomial(apprInt, doAggregation.size()));
-
-					Polynomial deg1Poly = Polynomial(Monomial(Interval(Real(-1) * coef1 * midPoint), doAggregation.size())) +
-					  Polynomial(Monomial(deg1Int, deg1));
-
-					Polynomial deg2Poly = Polynomial(Monomial(Interval(coef2 * midPoint * midPoint), doAggregation.size())) -
-					  Polynomial(Monomial(Interval(Real(2) * coef2 * midPoint), deg1)) +
-					  Polynomial(Monomial(deg2Int, deg2));
-					
-				        exp = deg0Poly + deg1Poly + deg2Poly;
-					remainder.to_sym_int(rem);
-
-					//if uncertainty too large, use a 3rd order approximation
-					if (rem.width() > 0.00001){					       
-
-						remainder = getArcTanDerBound(maxDev.getValue_RNDD(), 4);
-						remainder.to_sym_int(rem);
-
-						Polynomial deg3Poly = Polynomial(Monomial(Interval(Real(-1) * coef3 * midPoint * midPoint * midPoint),
-											  doAggregation.size())) +
-						  Polynomial(Monomial(Interval(Real(3) * coef3 * midPoint * midPoint), deg1)) -
-						  Polynomial(Monomial(Interval(Real(3) * coef3 * midPoint), deg2)) +
-						  Polynomial(Monomial(deg3Int, deg3));
-						
-					        exp += deg3Poly;
-					}					
-
-
-					std::string poly;
-					exp.toString(poly, realVarNames);
-
-					//printf("reset: %s\n", poly.c_str());
-					//printf("remainder: [%13.10f, %13.10f]\n", rem.inf(), rem.sup());
-					
-					transitions[initMode][i].resetMap.tmvReset.tms[varStoreInd].expansion = exp;
-					transitions[initMode][i].resetMap.tmvReset.tms[varStoreInd].remainder = rem;
-
-					if(rem.width() > 0.001){
-					        printf("Uncertainty too large. Please increase Taylor Model order.\n");
-						exit(-1);
-					}					
+					transitions[initMode][i].resetMap.tmvReset.tms[varStoreInd].expansion = new_tm_reset.expansion;
+					transitions[initMode][i].resetMap.tmvReset.tms[varStoreInd].remainder = new_tm_reset.remainder;
 				}
 
 				//this case deals with tan resets
-					if(!strncmp(modeName.c_str(), "_tan_", strlen("_tan_"))){
+				if(!strncmp(modeName.c_str(), "_tan_", strlen("_tan_"))){
 
 				        std::string varInd = "";
 
@@ -10576,100 +8320,23 @@ int HybridSystem::reach_hybrid(std::list<std::list<TaylorModelVec> > & flowpipes
 					}
 					int varDenInd = std::stoi(varInd);
 					std::string varDenName = stateVarNames[varDenInd];
-
-				        Polynomial exp;
-					Interval rem;
 				  
 				        //I'm keeping the intC name, although c states are not used anymore
 					Interval intC;
 					
 					tmvAggregation.tms[varDenInd].intEval(intC, doAggregation);
-					
-					Real midPoint = Real(intC.midpoint());
 
-					//printf("%s bounds: [%13.10f, %13.10f]\n", stateVarNames[varDenInd].c_str(), intC.inf(), intC.sup());
-
-				        Real apprPoint = tan(intC.midpoint());
-
-					//NB: This assumes a 2nd order TS approximation
-				        Real coef1 = tan1stDer(midPoint);
-				        Real coef2 = tan2ndDer(midPoint)/2;
-				        Real coef3 = tan3rdDer(midPoint)/6;
-
-				        Real derBound = getTanDerBound(3, intC);
-
-					Real maxDev = Real(intC.sup()) - midPoint;
-					if (midPoint - Real(intC.inf()) > maxDev){
-					        maxDev = midPoint - Real(intC.inf());
-					}
-
-					Real fact = 6;
-					maxDev.pow_assign(3);
-					
-					Real remainder = (derBound * maxDev) / fact;
-
-					Interval apprInt = Interval(apprPoint);
-
-					Interval deg1Int = Interval(coef1);
-					Interval deg2Int = Interval(coef2);
-					Interval deg3Int = Interval(coef3);
-
-					std::vector<int> deg1(stateVarNames.size() + 1, 0);
-					deg1[varDenInd + 1] = 1;
-					std::vector<int> deg2(stateVarNames.size() + 1, 0);
-					deg2[varDenInd + 1] = 2;
-					std::vector<int> deg3(stateVarNames.size() + 1, 0);
-					deg3[varDenInd + 1] = 3;
-
-					Polynomial deg0Poly = Polynomial(Monomial(apprInt, doAggregation.size()));
-
-					Polynomial deg1Poly = Polynomial(Monomial(Interval(Real(-1) * coef1 * midPoint), doAggregation.size())) +
-					  Polynomial(Monomial(deg1Int, deg1));
-
-					Polynomial deg2Poly = Polynomial(Monomial(Interval(coef2 * midPoint * midPoint), doAggregation.size())) -
-					  Polynomial(Monomial(Interval(Real(2) * coef2 * midPoint), deg1)) +
-					  Polynomial(Monomial(deg2Int, deg2));
-					
-				        exp = deg0Poly + deg1Poly + deg2Poly;
-					remainder.to_sym_int(rem);
-
-					//if uncertainty too large, use a 3rd order approximation
-					if (rem.width() > 0.00001){
-					        fact = 24;
-						maxDev = Real(intC.sup()) - midPoint;
-						maxDev.pow_assign(4);
-						derBound = getTanDerBound(4, intC);
-						
-						remainder = (derBound * maxDev) / fact;
-						remainder.to_sym_int(rem);
-
-						Polynomial deg3Poly = Polynomial(Monomial(Interval(Real(-1) * coef3 * midPoint * midPoint * midPoint),
-											  doAggregation.size())) +
-						  Polynomial(Monomial(Interval(Real(3) * coef3 * midPoint * midPoint), deg1)) -
-						  Polynomial(Monomial(Interval(Real(3) * coef3 * midPoint), deg2)) +
-						  Polynomial(Monomial(deg3Int, deg3));
-						
-					        exp += deg3Poly;
-					}					
-
-					std::string poly;
-					exp.toString(poly, realVarNames);
-
-					//printf("reset: %s\n", poly.c_str());
-					//printf("remainder: [%13.10f, %13.10f]\n", rem.inf(), rem.sup());
-					
-					transitions[initMode][i].resetMap.tmvReset.tms[varStoreInd].expansion = exp;
-					transitions[initMode][i].resetMap.tmvReset.tms[varStoreInd].remainder = rem;
-					
-
-					if(rem.width() > 0.001){
-					        printf("Uncertainty too large. Please increase Taylor Model order.\n");
-						exit(-1);
-					}					
+					TaylorModel new_tm_reset;
+				        tan_reset(new_tm_reset, intC, varStoreInd, varDenInd, numVars);
+										
+					transitions[initMode][i].resetMap.tmvReset.tms[varStoreInd].expansion = new_tm_reset.expansion;
+					transitions[initMode][i].resetMap.tmvReset.tms[varStoreInd].remainder = new_tm_reset.remainder;
+				        
 				}
-
+				
 				//this case deals with cos resets
-				if(!strncmp(modeName.c_str(), "_cos_", strlen("_cos_"))) {
+				if(!strncmp(modeName.c_str(), "_cos_", strlen("_cos_"))){
+
 				        std::string varInd = "";
 
 					int curInd = 5;
@@ -10685,100 +8352,23 @@ int HybridSystem::reach_hybrid(std::list<std::list<TaylorModelVec> > & flowpipes
 					}
 					int varDenInd = std::stoi(varInd);
 					std::string varDenName = stateVarNames[varDenInd];
-
-				        Polynomial exp;
-					Interval rem;
 				  
 				        //I'm keeping the intC name, although c states are not used anymore
 					Interval intC;
 					
 					tmvAggregation.tms[varDenInd].intEval(intC, doAggregation);
+
+					TaylorModel new_tm_reset;
+				        cos_reset(new_tm_reset, intC, varStoreInd, varDenInd, numVars);					
+										
+					transitions[initMode][i].resetMap.tmvReset.tms[varStoreInd].expansion = new_tm_reset.expansion;
+					transitions[initMode][i].resetMap.tmvReset.tms[varStoreInd].remainder = new_tm_reset.remainder;
 					
-					Real midPoint = Real(intC.midpoint());
-
-					//printf("%s bounds: [%13.10f, %13.10f]\n", stateVarNames[varDenInd].c_str(), intC.inf(), intC.sup());
-
-				        Real apprPoint = cosine(intC.midpoint());
-
-					//NB: This assumes a 2nd order TS approximation
-				        Real coef1 = cos1stDer(midPoint);
-				        Real coef2 = cos2ndDer(midPoint)/2;
-				        Real coef3 = cos3rdDer(midPoint)/6;
-
-				        Real derBound = getCosDerBound(3, intC);
-
-					Real maxDev = Real(intC.sup()) - midPoint;
-					if (midPoint - Real(intC.inf()) > maxDev){
-					        maxDev = midPoint - Real(intC.inf());
-					}
-
-					Real fact = 6;
-					maxDev.pow_assign(3);
-					
-					Real remainder = (derBound * maxDev) / fact;
-
-					Interval apprInt = Interval(apprPoint);
-
-					Interval deg1Int = Interval(coef1);
-					Interval deg2Int = Interval(coef2);
-					Interval deg3Int = Interval(coef3);
-
-					std::vector<int> deg1(stateVarNames.size() + 1, 0);
-					deg1[varDenInd + 1] = 1;
-					std::vector<int> deg2(stateVarNames.size() + 1, 0);
-					deg2[varDenInd + 1] = 2;
-					std::vector<int> deg3(stateVarNames.size() + 1, 0);
-					deg3[varDenInd + 1] = 3;
-
-					Polynomial deg0Poly = Polynomial(Monomial(apprInt, doAggregation.size()));
-
-					Polynomial deg1Poly = Polynomial(Monomial(Interval(Real(-1) * coef1 * midPoint), doAggregation.size())) +
-					  Polynomial(Monomial(deg1Int, deg1));
-
-					Polynomial deg2Poly = Polynomial(Monomial(Interval(coef2 * midPoint * midPoint), doAggregation.size())) -
-					  Polynomial(Monomial(Interval(Real(2) * coef2 * midPoint), deg1)) +
-					  Polynomial(Monomial(deg2Int, deg2));
-					
-				        exp = deg0Poly + deg1Poly + deg2Poly;
-					remainder.to_sym_int(rem);
-
-					//if uncertainty too large, use a 3rd order approximation
-					if (rem.width() > 0.00001){
-					        fact = 24;
-						maxDev = Real(intC.sup()) - midPoint;
-						maxDev.pow_assign(4);
-						derBound = getCosDerBound(4, intC);
-						
-						remainder = (derBound * maxDev) / fact;
-						remainder.to_sym_int(rem);
-
-						Polynomial deg3Poly = Polynomial(Monomial(Interval(Real(-1) * coef3 * midPoint * midPoint * midPoint),
-											  doAggregation.size())) +
-						  Polynomial(Monomial(Interval(Real(3) * coef3 * midPoint * midPoint), deg1)) -
-						  Polynomial(Monomial(Interval(Real(3) * coef3 * midPoint), deg2)) +
-						  Polynomial(Monomial(deg3Int, deg3));
-						
-					        exp += deg3Poly;
-					}					
-
-					std::string poly;
-					exp.toString(poly, realVarNames);
-
-					//printf("reset: %s\n", poly.c_str());
-					//printf("remainder: [%13.10f, %13.10f]\n", rem.inf(), rem.sup());
-					
-					transitions[initMode][i].resetMap.tmvReset.tms[varStoreInd].expansion = exp;
-					transitions[initMode][i].resetMap.tmvReset.tms[varStoreInd].remainder = rem;
-					
-
-					if(rem.width() > 0.001){
-					        printf("Uncertainty too large. Please increase Taylor Model order.\n");
-						exit(-1);
-					}					
 				}
 
 				//this case deals with sin resets
 				if(!strncmp(modeName.c_str(), "_sin_", strlen("_sin_"))){
+
 				        std::string varInd = "";
 
 					int curInd = 5;
@@ -10793,101 +8383,23 @@ int HybridSystem::reach_hybrid(std::list<std::list<TaylorModelVec> > & flowpipes
 					        varInd = varInd + modeName[curInd];
 					}
 					int varDenInd = std::stoi(varInd);
-					std::string varDenName = stateVarNames[varDenInd];
-
-				        Polynomial exp;
-					Interval rem;
 				  
 				        //I'm keeping the intC name, although c states are not used anymore
 					Interval intC;
 					
 					tmvAggregation.tms[varDenInd].intEval(intC, doAggregation);
-					
-					Real midPoint = Real(intC.midpoint());
 
-					//printf("%s bounds: [%13.10f, %13.10f]\n", stateVarNames[varDenInd].c_str(), intC.inf(), intC.sup());
-
-				        Real apprPoint = sine(intC.midpoint());
-
-					//NB: This assumes a 2nd order TS approximation
-				        Real coef1 = sin1stDer(midPoint);
-				        Real coef2 = sin2ndDer(midPoint)/2;
-				        Real coef3 = sin3rdDer(midPoint)/6;
-
-				        Real derBound = getSinDerBound(3, intC);
-
-					Real maxDev = Real(intC.sup()) - midPoint;
-					if (midPoint - Real(intC.inf()) > maxDev){
-					        maxDev = midPoint - Real(intC.inf());
-					}
-
-					Real fact = 6;
-					maxDev.pow_assign(3);
-					
-					Real remainder = (derBound * maxDev) / fact;
-
-					Interval apprInt = Interval(apprPoint);
-
-					Interval deg1Int = Interval(coef1);
-					Interval deg2Int = Interval(coef2);
-					Interval deg3Int = Interval(coef3);
-
-					std::vector<int> deg1(stateVarNames.size() + 1, 0);
-					deg1[varDenInd + 1] = 1;
-					std::vector<int> deg2(stateVarNames.size() + 1, 0);
-					deg2[varDenInd + 1] = 2;
-					std::vector<int> deg3(stateVarNames.size() + 1, 0);
-					deg3[varDenInd + 1] = 3;
-
-					Polynomial deg0Poly = Polynomial(Monomial(apprInt, doAggregation.size()));
-
-					Polynomial deg1Poly = Polynomial(Monomial(Interval(Real(-1) * coef1 * midPoint), doAggregation.size())) +
-					  Polynomial(Monomial(deg1Int, deg1));
-
-					Polynomial deg2Poly = Polynomial(Monomial(Interval(coef2 * midPoint * midPoint), doAggregation.size())) -
-					  Polynomial(Monomial(Interval(Real(2) * coef2 * midPoint), deg1)) +
-					  Polynomial(Monomial(deg2Int, deg2));
-					
-				        exp = deg0Poly + deg1Poly + deg2Poly;
-					remainder.to_sym_int(rem);
-
-					//if uncertainty too large, use a 3rd order approximation
-					if (rem.width() > 0.00001){
-					        fact = 24;
-						maxDev = Real(intC.sup()) - midPoint;
-						maxDev.pow_assign(4);
-						derBound = getSinDerBound(4, intC);
-						
-						remainder = (derBound * maxDev) / fact;
-						remainder.to_sym_int(rem);
-
-						Polynomial deg3Poly = Polynomial(Monomial(Interval(Real(-1) * coef3 * midPoint * midPoint * midPoint),
-											  doAggregation.size())) +
-						  Polynomial(Monomial(Interval(Real(3) * coef3 * midPoint * midPoint), deg1)) -
-						  Polynomial(Monomial(Interval(Real(3) * coef3 * midPoint), deg2)) +
-						  Polynomial(Monomial(deg3Int, deg3));
-						
-					        exp += deg3Poly;
-					}					
-
-					std::string poly;
-					exp.toString(poly, realVarNames);
-
-					//printf("reset: %s\n", poly.c_str());
-					//printf("remainder: [%13.10f, %13.10f]\n", rem.inf(), rem.sup());
-					
-					transitions[initMode][i].resetMap.tmvReset.tms[varStoreInd].expansion = exp;
-					transitions[initMode][i].resetMap.tmvReset.tms[varStoreInd].remainder = rem;
-					
-
-					if(rem.width() > 0.001){
-					        printf("Uncertainty too large. Please increase Taylor Model order.\n");
-						exit(-1);
-					}					
+					TaylorModel new_tm_reset;
+				        sin_reset(new_tm_reset, intC, varStoreInd, varDenInd, numVars);
+										
+					transitions[initMode][i].resetMap.tmvReset.tms[varStoreInd].expansion = new_tm_reset.expansion;
+					transitions[initMode][i].resetMap.tmvReset.tms[varStoreInd].remainder = new_tm_reset.remainder;
+				        					
 				}				
 				
 				//this case deals with sqrt resets
 				if(!strncmp(modeName.c_str(), "_sqrt_", strlen("_sqrt_"))){
+
 				        std::string varInd = "";
 
 					int curInd = 6;
@@ -10902,203 +8414,66 @@ int HybridSystem::reach_hybrid(std::list<std::list<TaylorModelVec> > & flowpipes
 					        varInd = varInd + modeName[curInd];
 					}
 					int varDenInd = std::stoi(varInd);
-					std::string varDenName = stateVarNames[varDenInd];
-
-				        Polynomial exp;
-					Interval rem;
 				  
 				        //I'm keeping the intC name, although c states are not used anymore
 					Interval intC;
 					
 					tmvAggregation.tms[varDenInd].intEval(intC, doAggregation);
+
+					TaylorModel new_tm_reset;
+				        sqrt_reset(new_tm_reset, intC, varStoreInd, varDenInd, numVars);				 
+
+					transitions[initMode][i].resetMap.tmvReset.tms[varStoreInd].expansion = new_tm_reset.expansion;
+					transitions[initMode][i].resetMap.tmvReset.tms[varStoreInd].remainder = new_tm_reset.remainder;
 					
-					Real midPoint = Real(intC.midpoint());
-
-					//printf("%s bounds: [%13.10f, %13.10f]\n", stateVarNames[varDenInd].c_str(), intC.inf(), intC.sup());
-
-				        Real apprPoint = sqrt(intC.midpoint());
-
-					//NB: This assumes a 2nd order TS approximation
-				        Real coef1 = sqrt1stDer(midPoint);
-				        Real coef2 = sqrt2ndDer(midPoint)/2;
-				        Real coef3 = sqrt3rdDer(midPoint)/6;
-
-				        Real derBound = getSqrtDerBound(3, intC);
-
-					Real maxDev = Real(intC.sup()) - midPoint;
-					if (midPoint - Real(intC.inf()) > maxDev){
-					        maxDev = midPoint - Real(intC.inf());
-					}
-
-					Real fact = 6;
-					maxDev.pow_assign(3);
-					
-					Real remainder = (derBound * maxDev) / fact;
-
-					Interval apprInt = Interval(apprPoint);
-
-					Interval deg1Int = Interval(coef1);
-					Interval deg2Int = Interval(coef2);
-					Interval deg3Int = Interval(coef3);
-
-					std::vector<int> deg1(stateVarNames.size() + 1, 0);
-					deg1[varDenInd + 1] = 1;
-					std::vector<int> deg2(stateVarNames.size() + 1, 0);
-					deg2[varDenInd + 1] = 2;
-					std::vector<int> deg3(stateVarNames.size() + 1, 0);
-					deg3[varDenInd + 1] = 3;
-
-					Polynomial deg0Poly = Polynomial(Monomial(apprInt, doAggregation.size()));
-
-					Polynomial deg1Poly = Polynomial(Monomial(Interval(Real(-1) * coef1 * midPoint), doAggregation.size())) +
-					  Polynomial(Monomial(deg1Int, deg1));
-
-					Polynomial deg2Poly = Polynomial(Monomial(Interval(coef2 * midPoint * midPoint), doAggregation.size())) -
-					  Polynomial(Monomial(Interval(Real(2) * coef2 * midPoint), deg1)) +
-					  Polynomial(Monomial(deg2Int, deg2));
-					
-				        exp = deg0Poly + deg1Poly + deg2Poly;
-					remainder.to_sym_int(rem);
-
-					//if uncertainty too large, use a 3rd order approximation
-					if (rem.width() > 0.00001){
-					        fact = 24;
-						maxDev = Real(intC.sup()) - midPoint;
-						maxDev.pow_assign(4);
-						derBound = getSqrtDerBound(4, intC);
-						
-						remainder = (derBound * maxDev) / fact;
-						remainder.to_sym_int(rem);
-
-						Polynomial deg3Poly = Polynomial(Monomial(Interval(Real(-1) * coef3 * midPoint * midPoint * midPoint),
-											  doAggregation.size())) +
-						  Polynomial(Monomial(Interval(Real(3) * coef3 * midPoint * midPoint), deg1)) -
-						  Polynomial(Monomial(Interval(Real(3) * coef3 * midPoint), deg2)) +
-						  Polynomial(Monomial(deg3Int, deg3));
-						
-					        exp += deg3Poly;
-					}					
-
-					std::string poly;
-					exp.toString(poly, realVarNames);
-
-					//printf("reset: %s\n", poly.c_str());
-					//printf("remainder: [%13.10f, %13.10f]\n", rem.inf(), rem.sup());
-					
-					transitions[initMode][i].resetMap.tmvReset.tms[varStoreInd].expansion = exp;
-					transitions[initMode][i].resetMap.tmvReset.tms[varStoreInd].remainder = rem;
-					
-
-					if(rem.width() > 0.001){
-					        printf("Uncertainty too large. Please increase Taylor Model order.\n");
-						exit(-1);
-					}					
-				}				
-
-				//this case deals with reset modes
-				if(!strncmp(modeName.c_str(), "_res", strlen("_res"))){
-				        std::string numStepsString;
-					int numSteps = 2; //default
-				        int curInd = 5;
-					bool newNumSteps = false;
-					for(; modeName[curInd] != '_'; curInd++){
-					        numStepsString = numStepsString + modeName[curInd];
-						newNumSteps = true;
-					}
-					
-					if(newNumSteps)
-					        numSteps = std::stoi(numStepsString);
-
-				        struct timeval tp;
-					gettimeofday(&tp, NULL);
-					long int ms = tp.tv_sec * 1000 + tp.tv_usec / 1000;
-
-					//NB: This assumes state k has index 9
-					Interval intC;
-					tmvAggregation.tms[9].intEval(intC, doAggregation);
-					
-					int curStep = round(intC.inf());
-				  
-				        std::string reachFile = "../pythonScripts/autogenerated_bounds/reach_" + std::to_string(ms) + ".txt";
-
-					bool branching = false;
-
-					if (curStep % numSteps == 0){
-					        std::ofstream outStream;
-						outStream.open(reachFile);
-				  
-						//NB: This assumes there are 12 plant states
-						for(int varInd = 0; varInd < 12; varInd ++){
-					  
-						        tmvAggregation.tms[varInd].intEval(intC, doAggregation);
-
-							if (varInd == 5 && intC.width() > 1.5){
-							        //printf("%s bounds: [%13.10f, %13.10f]\n", stateVarNames[varInd].c_str(), intC.inf(), (intC.inf() + intC.sup())/2);
-								outStream << std::setprecision(8) << stateVarNames[varInd].c_str() << " in [" << intC.inf() << ", " << (intC.inf() + intC.sup())/2 << "]\n";
-								branching = true;
-								numBranches++;
-							}
-							else{
-							        //printf("%s bounds: [%13.10f, %13.10f]\n", stateVarNames[varInd].c_str(), intC.inf(), intC.sup());
-								outStream << std::setprecision(8) << stateVarNames[varInd].c_str() << " in [" << intC.inf() << ", " << intC.sup() << "]\n";
-							}
-
-							
-						}
-
-						outStream.close();
-
-						//this case splits the reachable set into two to reduce the error
-						//NB: this is specific to the F1/10 case study
-						if(branching){
-
-						        gettimeofday(&tp, NULL);
-							ms = tp.tv_sec * 1000 + tp.tv_usec / 1000;
-							reachFile = "../pythonScripts/autogenerated_bounds/reach_" + std::to_string(ms) + ".txt";
-							
-						        outStream.open(reachFile);
-				  
-							//NB: This assumes there are 12 plant states
-							for(int varInd = 0; varInd < 12; varInd ++){
-					  
-							        tmvAggregation.tms[varInd].intEval(intC, doAggregation);
-
-								if (varInd == 5){
-								        //printf("%s bounds: [%13.10f, %13.10f]\n", stateVarNames[varInd].c_str(), (intC.inf() + intC.sup())/2, intC.sup());
-									outStream << std::setprecision(8) << stateVarNames[varInd].c_str() << " in [" << (intC.inf() + intC.sup())/2 << ", " << intC.sup() << "]\n";
-								}
-								else{
-								        //printf("%s bounds: [%13.10f, %13.10f]\n", stateVarNames[varInd].c_str(), intC.inf(), intC.sup());
-									outStream << std::setprecision(8) << stateVarNames[varInd].c_str() << " in [" << intC.inf() << ", " << intC.sup() << "]\n";
-								}
-
-								
-							}
-
-							outStream.close();
-						}
-					}
-
 				}
-				//end of code added by Rado
+
+				// check if plant states are reset
+				// this is necessary because if states are reset, then the stored flowpipes are no longer valid
+
+				//first, check if there exist stored flowpipes in the first place
+				if(dnn::saved_plant_states.find(dnn::curBranchId) != dnn::saved_plant_states.end()){
+
+				        if(transitions[initMode][i].resetMap.tmvReset.tms.size() > stateVarNames.size()){
+					        printf("Something is wrong. Not all resets are specified. Exiting...\n");
+						exit(1);
+					}
+				  
+				        for(int resetInd = 0; resetInd < transitions[initMode][i].resetMap.tmvReset.tms.size(); resetInd++){
+
+					        //this assumes that all states start with an x or a y
+					        if(stateVarNames[resetInd][0] == 'y' || stateVarNames[resetInd][0] == 'x'){
+
+						        TaylorModel stateReset = transitions[initMode][i].resetMap.tmvReset.tms[resetInd];
+							Monomial stateResetMon = stateReset.expansion.monomials.front();
+
+							// only keep stored flowpipes if states are reset to themselves
+							if(stateReset.expansion.monomials.size() == 1  &&
+							   stateResetMon.degree() == 1 &&
+							   stateResetMon.getDegrees()[resetInd + 1] == 1 &&
+							   stateResetMon.getCoefficient().inf() == 1.0 &&
+							   stateResetMon.getCoefficient().sup() == 1.0 &&
+							   stateReset.remainder.width() == 0){
+
+							        //keep stored flowpipes
+							}
+							else{//erase flowpipes
+							        dnn::saved_plant_states.erase(dnn::curBranchId);
+							}
+						}
+					  
+					}
+				}
 				
 
+				//End of code added by Rado
+				
 				//reset map
 				TaylorModelVec tmvImage;
 				transitions[initMode][i].resetMap.reset(tmvImage, tmvAggregation, doAggregation, globalMaxOrder, cutoff_threshold);
 
-				//quick test by Rado
-				if(!strncmp(modeName.c_str(), "postprint", strlen("postprint"))){  
-				        for(int varInd = 0; varInd < transitions[initMode][i].resetMap.tmvReset.tms.size(); varInd ++){
-					        Interval intC;
-				 		tmvImage.tms[varInd].intEval(intC, doAggregation);
-						printf("%s bounds after reset: [%13.10f, %13.10f]\n", stateVarNames[varInd].c_str(), intC.inf(), intC.sup());		
-					}
-				}
-
-
 				std::vector<bool> bVecDummy;
-				int type = contract_interval_arithmetic(tmvImage, doAggregation, invariants[transitions[initMode][i].targetID], bVecDummy, cutoff_threshold);			       
+				int type = contract_interval_arithmetic(tmvImage, doAggregation, invariants[transitions[initMode][i].targetID], bVecDummy, cutoff_threshold);
 
 				if(type == -1)
 				{
@@ -11126,14 +8501,587 @@ int HybridSystem::reach_hybrid(std::list<std::list<TaylorModelVec> > & flowpipes
 					fpAggregation.tmv = tmvTemp;
 					fpAggregation.tmvPre = tmvImage;
 					fpAggregation.domain = doAggregation;
-
 				}
+
+				//Code added by Rado
+				      
+				// Polynomial poly = tmvAggregation.tms[9].expansion; //should be u
+				// std::string printing;
+				// poly.toString(printing, realVarNames);
+
+				// //printf("TM for %s after: %s\n", stateVarNames[9].c_str(), printing.c_str());
+				// printf("remainder for %s after: [%f, %f]\n", stateVarNames[9].c_str(), tmvAggregation.tms[9].remainder.inf(), tmvAggregation.tms[9].remainder.sup());
+				
+				/*
+				  This is currently after the Flow* reset in order to not have to
+				  un-normalize the DNN flowpipes when inserting them back into the Flow*
+				  aggregated flowpipe.
+				 */
+				if(!strncmp(modeName.c_str(), "DNN", strlen("DNN"))){
+
+					gettimeofday(&beginNN, NULL);
+				  
+					if(!dnn::dnn_initialized){
+
+					        //First, load the DNN
+					        dnn::load_dnn(dnn::dnn_resets, dnn::dnn_activations,
+							      dnn::augmentedStateVars, dnn::augmentedVarNames,
+							      realStateVars, stateVarNames);
+						
+					        //Create a reachability setting for the DNN computations.
+					        dnn::dnn_crs.setFixedStepsize(0.01);
+						dnn::dnn_crs.setFixedOrder(4);
+						dnn::dnn_crs.setPrecision(100);
+						Interval cutoff(-1e-18,1e-18);
+						dnn::dnn_crs.setCutoff(cutoff);
+
+						Interval E(-0.1,0.1);
+						std::vector<Interval> estimation;
+						for(int i = 0; i < dnn::augmentedStateVars.size() - 1; ++i){
+						        estimation.push_back(E);	// estimation for the i-th variable
+						}
+						dnn::dnn_crs.setRemainderEstimation(estimation);
+						
+						dnn::dnn_crs.prepareForReachability();
+						//end of reachability setting initialization
+
+						/*
+						  Initialize the activation function ResetMap.
+						  This is originally the identity as it will be changing dynamically.
+						*/
+						TaylorModelVec tmv_activation_reset;
+						std::vector<bool> is_identity(dnn::augmentedVarNames.size() - 1);
+						for(int varInd = 0; varInd < dnn::augmentedVarNames.size() - 1; varInd++){
+						  
+						        TaylorModel tm_reset;
+							if(!strncmp(dnn::augmentedVarNames[varInd+1].c_str(), "_f", strlen("_f"))){
+							        tm_reset = TaylorModel("0", dnn::augmentedStateVars);
+								is_identity[varInd] = false;
+							}
+							else{
+							        tm_reset = TaylorModel(dnn::augmentedVarNames[varInd+1],
+										       dnn::augmentedStateVars);
+								is_identity[varInd] = true;
+							}
+						
+							tmv_activation_reset.tms.push_back(tm_reset);
+						}
+						
+						dnn::activation_reset.tmvReset = tmv_activation_reset;
+						dnn::activation_reset.is_identity = is_identity;
+						//end of activation reset initialization						
+
+						//toggle the initialized bool
+					        dnn::dnn_initialized = true;
+					}
+
+					//all_ranges is used to store interval approximations of all states
+				        std::vector<Interval> all_ranges;
+
+					int numDnnVars = dnn::augmentedVarNames.size();
+
+					/*
+					  I alternate between after_activation_reset and after_linear_reset
+					  for consistency with the initial autogenerated C++ code
+					*/
+					Flowpipe after_activation_reset;
+					Flowpipe after_linear_reset;
+
+					// Create flowpipes for all new states
+					after_activation_reset.domain.push_back(fpAggregation.domain[0]);
+					for(int varInd = 0; varInd < dnn::augmentedVarNames.size() - 1; varInd++){
+
+					        // state variables
+					        if(varInd < stateVarNames.size()){
+
+						        TaylorModel tmPre, tm;
+
+							dnn::convert_TM_dimension(tmPre, fpAggregation.tmvPre.tms[varInd], numDnnVars);
+							dnn::convert_TM_dimension(tm, fpAggregation.tmv.tms[varInd], numDnnVars);
+							
+						        after_activation_reset.tmvPre.tms.push_back(tmPre);
+							after_activation_reset.tmv.tms.push_back(tm);
+							after_activation_reset.domain.push_back(fpAggregation.domain[varInd+1]);
+
+						}
+
+						else{
+						        after_activation_reset.tmvPre.tms.push_back(TaylorModel("0", dnn::augmentedStateVars));
+							after_activation_reset.tmv.tms.push_back(TaylorModel("0", dnn::augmentedStateVars));
+							after_activation_reset.domain.push_back(Interval(-1.0, 1.0));
+						}
+
+					}
+					
+					//after_activation_reset = Flowpipe(fpAggregation);
+
+					// after_activation_reset.intEvalNormal(all_ranges, dnn::dnn_crs.step_end_exp_table, dnn::dnn_crs.cutoff_threshold);
+
+					// for(int varInd = 0; varInd < dnn::augmentedVarNames.size() - 1; varInd++){
+					//   printf("Range for %s: [%f, %f]\n", dnn::augmentedVarNames[varInd+1].c_str(), all_ranges[varInd].inf(), all_ranges[varInd].sup());
+					// }
+
+					//go through the DNN resets
+					for(int layer = 0; layer < dnn::dnn_resets.size(); layer++){
+
+
+					        if(bPrint){
+						        printf("Jumping to layer %d\n", layer + 1);
+							printf("Performing linear reset...\n");
+						}
+
+					        //NB: this assumes there is always a linear reset first
+					        dnn::dnn_resets[layer].reset(after_linear_reset, after_activation_reset, dnn::dnn_crs);
+						
+						//printing
+						// TaylorModelVec tmv_printing_lin;
+						// after_linear_reset.composition(tmv_printing_lin, dnn::dnn_crs.cutoff_threshold);
+						
+						// for(int varInd = 0; varInd < realVarNames.size() - 1; varInd++){
+						//         Polynomial poly = tmv_printing_lin.tms[varInd].expansion;
+						// 	std::string printing;
+						// 	poly.toString(printing, realVarNames);
+						    
+						// 	printf("TM for %s: %s\n", stateVarNames[varInd].c_str(), printing.c_str());
+						// 	printf("remainder for %s: [%13.10f, %13.10f]\n", stateVarNames[varInd].c_str(), tmv_printing_lin.tms[varInd].remainder.inf(), tmv_printing_lin.tms[varInd].remainder.sup());
+						// }
+
+					        //if no activation function, just set after_activation_reset equal to after_linear_reset
+					        if(dnn::dnn_activations[layer] != dnn::SIGMOID &&
+						   dnn::dnn_activations[layer] != dnn::TANH &&
+						   dnn::dnn_activations[layer] != dnn::SWISH &&
+						   dnn::dnn_activations[layer] != dnn::RELU){
+
+						        after_activation_reset = after_linear_reset;
+						        continue;
+						}
+
+						after_linear_reset.intEvalNormal(all_ranges, dnn::dnn_crs.step_end_exp_table, dnn::dnn_crs.cutoff_threshold);
+
+
+						//print state ranges after reset
+						// for(int varInd = 0; varInd < tmvAggregation.tms.size(); varInd++){
+						  
+						//   printf("%s range: [%13.10f, %13.10f]\n", realVarNames[varInd + 1].c_str(), all_ranges[varInd].inf(), all_ranges[varInd].sup());
+						//   printf("remainder for %s: [%13.10f, %13.10f]\n", stateVarNames[varInd].c_str(), after_linear_reset.tmvPre.tms[varInd].remainder.inf(), after_linear_reset.tmvPre.tms[varInd].remainder.inf());
+						// }
+						
+
+						//modify the reset depending on the activation function TM
+						for(int varInd = 0; varInd < dnn::augmentedVarNames.size() - 1; varInd++){
+
+							if(strncmp(dnn::augmentedVarNames[varInd+1].c_str(), "_f", strlen("_f"))) continue;
+
+							Interval intC = all_ranges[varInd];
+
+							TaylorModel new_tm_reset;
+							
+							if(dnn::dnn_activations[layer] == dnn::SIGMOID){
+							        dnn::sig_reset(new_tm_reset, intC, varInd, numDnnVars);
+							}
+							
+							else if(dnn::dnn_activations[layer] == dnn::TANH){
+							        dnn::tanh_reset(new_tm_reset, intC, varInd, numDnnVars);
+							}
+							
+							else if(dnn::dnn_activations[layer] == dnn::SWISH){
+							        //dnn::swish_reset(new_tm_reset, intC, varInd, numVars);
+							        dnn::swish10_reset(new_tm_reset, intC, varInd, numDnnVars);
+							}
+							
+							else if(dnn::dnn_activations[layer] == dnn::RELU){
+							        dnn::relu_reset(new_tm_reset, intC, varInd, numDnnVars);
+							}
+														
+							dnn::activation_reset.tmvReset.tms[varInd] = new_tm_reset;
+						}
+						
+						if(bPrint){
+						        printf("Performing activation reset...\n");
+						}
+
+						//perform the activation reset
+						dnn::activation_reset.reset(after_activation_reset, after_linear_reset, dnn::dnn_crs);
+
+						//printing
+						// TaylorModelVec tmv_printing_act;
+						// after_activation_reset.composition(tmv_printing_act, dnn::dnn_crs.cutoff_threshold);
+						
+						// for(int varInd = 0; varInd < dnn::augmentedVarNames.size() - 1; varInd++){
+						//     Polynomial poly = tmv_printing_act.tms[varInd].expansion;
+						//     std::string printing;
+						//     poly.toString(printing, realVarNames);
+						    
+						//     printf("TM for %s: %s\n", dnn::augmentedVarNames[varInd+1].c_str(), printing.c_str());
+						//     printf("remainder for %s: [%13.10f, %13.10f]\n", dnn::augmentedVarNames[varInd+1].c_str(), tmv_printing_act.tms[varInd].remainder.inf(), tmv_printing_act.tms[varInd].remainder.sup());
+						// }
+
+						// print state ranges after reset
+						// after_activation_reset.intEval(all_ranges, dnn::dnn_crs.cutoff_threshold);
+						// if(bPrint){
+						//   for(int varInd = 0; varInd < dnn::augmentedVarNames.size() - 1; varInd ++){
+				  
+						//     printf("%s bounds after reset: [%13.10f, %13.10f]\n", dnn::augmentedVarNames[varInd+1].c_str(), all_ranges[varInd].inf(), all_ranges[varInd].sup());
+						//   }
+						// }	   
+						
+					}
+
+					// Store DNN flowpipes back in the plant flowpipe
+					for(int varInd = 0; varInd < stateVarNames.size(); varInd++){
+					        if(!strncmp(stateVarNames[varInd].c_str(), "_f", strlen("_f"))){
+
+						        TaylorModel tmPre, tm;
+
+							dnn::convert_TM_dimension(tmPre, after_activation_reset.tmvPre.tms[varInd], stateVarNames.size() + 1);
+							dnn::convert_TM_dimension(tm, after_activation_reset.tmv.tms[varInd], stateVarNames.size() + 1);
+						  
+						        fpAggregation.tmvPre.tms[varInd] = tmPre;
+							fpAggregation.tmv.tms[varInd] = tm;
+							fpAggregation.domain[varInd+1] = after_activation_reset.domain[varInd+1];
+						}
+					}
+
+					//fpAggregation = Flowpipe(after_activation_reset);
+					
+					gettimeofday(&endNN, NULL);
+					double elapsedSecs = (endNN.tv_sec - beginNN.tv_sec) + (endNN.tv_usec - beginNN.tv_usec) / 1000000.0;
+					dnn::dnn_runtime += elapsedSecs;
+				}
+
+				/*
+				  this case deals with modes that load Taylor model descriptions of plant states
+				 */
+				if(!strncmp(modeName.c_str(), "_load_", strlen("_load_")) &&
+				   dnn::saved_plant_states.find(dnn::curBranchId) != dnn::saved_plant_states.end()){
+
+					// if(dnn::saved_plant_states.find(branchId) != dnn::saved_plant_states.end())
+					//     printf("YES!\n");
+				  
+				        Flowpipe curFP = dnn::saved_plant_states[dnn::curBranchId];
+
+					/*
+					  this boolean is used to determined whether to just
+					  keep the interval approximation (if Taylor model remainders are too large)
+					 */
+					bool largeRemainder = false;					
+				  
+				        //NB: this currently assumes all state names begin with y or x
+					for(int varInd = 0; varInd < tmvAggregation.tms.size(); varInd++){
+					  
+					        if(stateVarNames[varInd][0] != 'y' && stateVarNames[varInd][0] != 'x'){
+
+						        curFP.tmv.tms[varInd] = fpAggregation.tmv.tms[varInd];
+						        curFP.tmvPre.tms[varInd] = fpAggregation.tmvPre.tms[varInd];
+						        curFP.domain[varInd + 1] = fpAggregation.domain[varInd + 1];
+				                }
+						else{
+						        if(curFP.tmvPre.tms[varInd].remainder.width() > 0.0001){
+				                                largeRemainder = true;
+				                        }
+				                }
+				        }
+
+					if(!largeRemainder)
+					        fpAggregation = Flowpipe(curFP);
+					
+				}
+
+				/*
+				  this case deals with modes that save Taylor model descriptions of plant states
+				  and temporarily replace them with interval approximations
+				 */
+				if(!strncmp(curModeName.c_str(), "_store_", strlen("_store_"))){
+
+					//X0 stores the interval approximations for the f states only
+					std::vector<Interval> X0(tmvAggregation.tms.size());
+
+					//initialize the saved states flowpipe to 0 taylor models initially
+					Flowpipe newSaveFP = Flowpipe(X0, intZero);
+					
+					std::vector<Interval> all_ranges;
+					fpAggregation.intEval(all_ranges, cutoff_threshold);
+
+					//NB: this currently assumes all state names begin with y or x
+					for(int varInd = 0; varInd < tmvAggregation.tms.size(); varInd++){
+					        if(stateVarNames[varInd][0] == 'y' || stateVarNames[varInd][0] == 'x'){
+						  
+				                        Interval intC = all_ranges[varInd];
+						        tmvAggregation.tms[varInd].intEval(intC, doAggregation);
+							
+							X0[varInd] = intC;	
+						}
+					}
+					Flowpipe tempFP(X0, intZero);
+					
+					for(int varInd = 0; varInd < tmvAggregation.tms.size(); varInd++){
+					        if(stateVarNames[varInd][0] != 'y' && stateVarNames[varInd][0] != 'x'){
+
+						        tempFP.tmv.tms[varInd] = fpAggregation.tmv.tms[varInd];
+						        tempFP.tmvPre.tms[varInd] = fpAggregation.tmvPre.tms[varInd];
+						        tempFP.domain[varInd + 1] = fpAggregation.domain[varInd + 1];
+						}
+					}
+
+				        //NB: this currently assumes all state names begin with y or x
+					for(int varInd = 0; varInd < tmvAggregation.tms.size(); varInd++){
+					        if(stateVarNames[varInd][0] == 'y' || stateVarNames[varInd][0] == 'x'){
+
+						        newSaveFP.tmv.tms[varInd] = fpAggregation.tmv.tms[varInd];
+						        newSaveFP.tmvPre.tms[varInd] = fpAggregation.tmvPre.tms[varInd];
+						        newSaveFP.domain[varInd + 1] = fpAggregation.domain[varInd + 1];
+						}
+					}
+
+					if(numBranches == 0){
+					        dnn::saved_plant_states[dnn::curBranchId] = Flowpipe(newSaveFP);
+					}
+					else{
+					        //printf("branches: %d\n", dnn::totalNumBranches + 1);
+						dnn::saved_plant_states[dnn::totalNumBranches + 1] = Flowpipe(newSaveFP);
+					}
+					fpAggregation = Flowpipe(tempFP);
+					//dnn::load_reset[branchId] = true;
+				}				
+
+				/*
+				  this case deals with modes that reset flowpipes to interval approximations
+				 */
+				if(!strncmp(modeName.c_str(), "_reset_", strlen("_reset_"))){
+
+					/*
+					  this boolean is used to determine whether to
+					  keep the interval approximation (if Taylor model remainders are too large)
+					 */
+					bool largeRemainder = false;
+
+					//X0 stores the interval approximations for the f states only
+					std::vector<Interval> X0(tmvAggregation.tms.size());
+					
+					std::vector<Interval> all_ranges;
+					fpAggregation.intEval(all_ranges, cutoff_threshold);
+
+					//NB: this will only resets states whose names begin with y or x
+					for(int varInd = 0; varInd < tmvAggregation.tms.size(); varInd++){
+					        if(stateVarNames[varInd][0] == 'y' || stateVarNames[varInd][0] == 'x'){
+							X0[varInd] = all_ranges[varInd];	
+						}
+					}
+					Flowpipe curFP(X0, intZero);					
+				  
+					for(int varInd = 0; varInd < tmvAggregation.tms.size(); varInd++){
+					  
+					        if(stateVarNames[varInd][0] != 'y' && stateVarNames[varInd][0] != 'x'){
+
+						        curFP.tmv.tms[varInd] = fpAggregation.tmv.tms[varInd];
+						        curFP.tmvPre.tms[varInd] = fpAggregation.tmvPre.tms[varInd];
+						        curFP.domain[varInd + 1] = fpAggregation.domain[varInd + 1];
+				                }
+						else{
+						        //F1tenth
+						        // if(tmvAggregation.tms[varInd].remainder.width() > 0.0001){
+				                        //         largeRemainder = true;
+				                        // }
+
+						        //MC
+							if(tmvAggregation.tms[varInd].remainder.width() > 0.01){
+				                                largeRemainder = true;
+				                        }
+						
+				                }
+				        }			
+
+					if(largeRemainder){
+					        fpAggregation = Flowpipe(curFP);
+					}
+					
+				}
+
+				/*
+				  this case deals with continuous modes
+				  (that load saved Taylor model descriptions of plant states)
+				 */
+				
+				if(!strncmp(modeName.c_str(), "_cont_", strlen("_cont_")) &&
+				   dnn::saved_plant_states.find(dnn::curBranchId) != dnn::saved_plant_states.end()){
+
+ 				        Flowpipe curFP = dnn::saved_plant_states[dnn::curBranchId];
+					/*
+					  this boolean is used to determine whether to just
+					  keep the interval approximation (if Taylor model remainders are too large)
+					 */
+					bool largeRemainder = false;
+
+					TaylorModelVec composed_tmv;
+
+					curFP.composition(composed_tmv, cutoff_threshold);
+				  
+				        //NB: this currently assumes all state names begin with y or x
+					for(int varInd = 0; varInd < tmvAggregation.tms.size(); varInd++){
+
+					        if(stateVarNames[varInd][0] != 'y' && stateVarNames[varInd][0] != 'x'){
+
+						        curFP.tmv.tms[varInd] = fpAggregation.tmv.tms[varInd];
+						        curFP.tmvPre.tms[varInd] = fpAggregation.tmvPre.tms[varInd];
+						        curFP.domain[varInd + 1] = fpAggregation.domain[varInd + 1];
+				                }
+						else{
+						        //F1tenth
+						        // if(composed_tmv.tms[varInd].remainder.width() > 0.00001){
+				                        //         largeRemainder = true;
+				                        // }
+
+							//UUV
+						        if(composed_tmv.tms[varInd].remainder.width() > 0.0001){
+				                                largeRemainder = true;
+				                        }
+				                }
+				        }
+
+					if(largeRemainder){
+
+					  
+					        //X0 stores the interval approximations for the f states only
+					        std::vector<Interval> X0(tmvAggregation.tms.size());
+
+						std::vector<Interval> all_ranges;
+						fpAggregation.intEval(all_ranges, cutoff_threshold);
+
+						//NB: this currently assumes all state names begin with y or x
+						for(int varInd = 0; varInd < tmvAggregation.tms.size(); varInd++){
+						        if(stateVarNames[varInd][0] == 'y' || stateVarNames[varInd][0] == 'x'){
+
+								X0[varInd] = all_ranges[varInd];	
+							}
+						}
+						Flowpipe tempFP(X0, intZero);
+
+						for(int varInd = 0; varInd < tmvAggregation.tms.size(); varInd++){
+						        if(stateVarNames[varInd][0] != 'y' && stateVarNames[varInd][0] != 'x'){
+
+							        tempFP.tmv.tms[varInd] = fpAggregation.tmv.tms[varInd];
+								tempFP.tmvPre.tms[varInd] = fpAggregation.tmvPre.tms[varInd];
+								tempFP.domain[varInd + 1] = fpAggregation.domain[varInd + 1];
+							}
+						}
+
+						fpAggregation = Flowpipe(tempFP);
+
+					}
+					else{
+					        fpAggregation = Flowpipe(curFP);
+					}
+					
+				}
+
+				/*
+				  this case deals with continuous modes where we use a flowpipe with time in it,
+				  i.e., we ignore the last flowpipe and keep the second to last (saved in the map)
+				 */				
+				// if(!strncmp(curModeName.c_str(), "_cont_", strlen("_cont_")) &&
+				//    dnn::saved_plant_states.find(dnn::curBranchId) != dnn::saved_plant_states.end()){
+
+				//         fpAggregation = dnn::saved_plant_states[dnn::curBranchId];
+
+				// 	//reset clock to 0 (assumes clock is last variable)
+				// 	fpAggregation.tmvPre.tms[stateVarNames.size() - 1] = TaylorModel("0", realStateVars);
+				//         fpAggregation.tmv.tms[stateVarNames.size() - 1] = TaylorModel("0", realStateVars);
+				// 	fpAggregation.domain[stateVarNames.size()] = Interval(-1.0, 1.0);
+				// }
+
+				// /*
+				//   this case deals with continuous modes where the plant 
+				//   states are temporarily replaced with interval approximations
+				//  */
+				if(!strncmp(curModeName.c_str(), "_cont_", strlen("_cont_"))){
+
+					//X0 stores the interval approximations for the f states only
+					std::vector<Interval> X0(tmvAggregation.tms.size());
+
+					//initialize the saved states flowpipe to 0 taylor models initially
+					Flowpipe newSaveFP = Flowpipe(X0, intZero);
+					
+					std::vector<Interval> all_ranges;
+					fpAggregation.intEval(all_ranges, cutoff_threshold);
+
+					//NB: this currently assumes all state names begin with y or x
+					for(int varInd = 0; varInd < tmvAggregation.tms.size(); varInd++){
+					        if(stateVarNames[varInd][0] == 'y' || stateVarNames[varInd][0] == 'x'){
+						  
+							X0[varInd] = all_ranges[varInd];
+							//printf("ranges for %s: [%13.10f, %13.10f]\n", stateVarNames[varInd].c_str(), all_ranges[varInd].inf(), all_ranges[varInd].sup());
+						}
+					}
+					Flowpipe tempFP(X0, intZero);
+					
+					for(int varInd = 0; varInd < tmvAggregation.tms.size(); varInd++){
+					        if(stateVarNames[varInd][0] != 'y' && stateVarNames[varInd][0] != 'x'){
+
+						        tempFP.tmv.tms[varInd] = fpAggregation.tmv.tms[varInd];
+						        tempFP.tmvPre.tms[varInd] = fpAggregation.tmvPre.tms[varInd];
+						        tempFP.domain[varInd + 1] = fpAggregation.domain[varInd + 1];
+						}
+					}
+
+					fpAggregation = Flowpipe(tempFP);
+				}
+								
+				//print state ranges after reset
+				std::vector<Interval> all_ranges;
+				fpAggregation.intEval(all_ranges, cutoff_threshold);
+				if(bPrint){
+				        for(int varInd = 0; varInd < transitions[initMode][i].resetMap.tmvReset.tms.size(); varInd ++){
+				  
+					        printf("%s bounds after reset: [%13.10f, %13.10f]\n",
+						       stateVarNames[varInd].c_str(), all_ranges[varInd].inf(), all_ranges[varInd].sup());
+						
+						printf("%s remainder after reset: [%13.10f, %13.10f]\n",
+						       stateVarNames[varInd].c_str(), tmvImage.tms[varInd].remainder.inf(),
+						       tmvImage.tms[varInd].remainder.sup());
+					}
+				}
+
+				//printing
+				// TaylorModelVec tmv_printing_act;
+			        // fpAggregation.composition(tmv_printing_act, cutoff_threshold);
+						
+				// for(int varInd = 0; varInd < realVarNames.size() - 1; varInd++){
+				//     Polynomial poly = tmv_printing_act.tms[varInd].expansion;
+				//     std::string printing;
+				//     poly.toString(printing, realVarNames);
+						    
+				//     printf("TM for %s: %s\n", stateVarNames[varInd].c_str(), printing.c_str());
+				//     printf("remainder for %s: [%13.10f, %13.10f]\n", stateVarNames[varInd].c_str(), tmv_printing_act.tms[varInd].remainder.inf(), tmv_printing_act.tms[varInd].remainder.sup());
+				// }
+
+				if(!dnn::storedInitialConds){
+
+				        std::vector<Interval> all_ranges;
+					fpAggregation.intEval(all_ranges, cutoff_threshold);
+					
+				        for(int varInd = 0; varInd < transitions[initMode][i].resetMap.tmvReset.tms.size(); varInd ++){
+					        if(stateVarNames[varInd][0] == 'y' || stateVarNames[varInd][0] == 'x'){
+				  
+						        dnn::initialConds.push_back("[" +
+							   std::to_string(all_ranges[varInd].inf()) + ", " +
+							   std::to_string(all_ranges[varInd].sup()) + "]");
+						  
+						}
+
+					}
+
+					dnn::storedInitialConds = true;
+				}
+
+				
+				//end of code added by Rado
+				
 
 				startTime += newTimePassed;
 				if(startTime < time - THRESHOLD_HIGH)
 				{
 					modeQueue.push_back(transitions[initMode][i].targetID);
-					flowpipeQueue.push_back(fpAggregation);
+					flowpipeQueue.push_back(fpAggregation);					
 					timePassedQueue.push_back(startTime);
 					jumpsExecutedQueue.push_back(jumpsExecuted+1);
 					contractedQueue.push_back(mode_contracted | bContracted);
@@ -11143,13 +9091,33 @@ int HybridSystem::reach_hybrid(std::list<std::list<TaylorModelVec> > & flowpipes
 					node->children.push_back(child);
 
 					nodeQueue.push_back(child);
+
+					//Code added by Rado
+					if(numBranches == 0){
+					        branchIdQueue.push_back(dnn::curBranchId);
+					}
+					else{//new branch
+					        dnn::totalNumBranches++;
+						branchIdQueue.push_back(dnn::totalNumBranches);
+
+						//if nothing has been saved yet, then don't store anything
+						if(dnn::saved_plant_states.find(dnn::curBranchId) != dnn::saved_plant_states.end()){
+						        dnn::saved_plant_states[dnn::totalNumBranches] =
+								  dnn::saved_plant_states[dnn::curBranchId];
+						}
+					}
+					numBranches++;
+					//end of code added by Rado
 				}
 			}
 			else if(intersected_flowpipes.size() > 0)
 			{
 
 				//Code added by Rado
-				numBranches++;
+			        printf("Entered a case that is not supported by Verisig (multiple intersected flowpipes). Exiting...\n");
+				exit(1);
+				
+				//end of code added by Rado
 				
 				// aggregate the intersections
 				Flowpipe fpAggregation;
@@ -11222,7 +9190,7 @@ int HybridSystem::reach_hybrid(std::list<std::list<TaylorModelVec> > & flowpipes
 //				{
 //					tmvAggregation.normalize(doAggregation);
 //				}
-
+				
 				//reset map
 				TaylorModelVec tmvImage;
 				transitions[initMode][i].resetMap.reset(tmvImage, tmvAggregation, doAggregation, globalMaxOrder, cutoff_threshold);
@@ -11255,8 +9223,7 @@ int HybridSystem::reach_hybrid(std::list<std::list<TaylorModelVec> > & flowpipes
 					fpAggregation.tmv = tmvTemp;
 					fpAggregation.tmvPre = tmvImage;
 					fpAggregation.domain = doAggregation;
-
-				}
+				}				
 
 				startTime += newTimePassed;
 				if(startTime < time - THRESHOLD_HIGH)
@@ -11271,7 +9238,8 @@ int HybridSystem::reach_hybrid(std::list<std::list<TaylorModelVec> > & flowpipes
 					child->parent = node;
 					node->children.push_back(child);
 
-					nodeQueue.push_back(child);
+					nodeQueue.push_back(child);				
+
 				}
 			}
 			else
@@ -11286,9 +9254,7 @@ int HybridSystem::reach_hybrid(std::list<std::list<TaylorModelVec> > & flowpipes
 			{
 				printf("Done.\n");
 			}
-
 		}
-
 	}
 
 	return checking_result;
@@ -11580,10 +9546,9 @@ HybridReachability::~HybridReachability()
 	delete traceTree;
 }
 
-//Rado, look here
 void HybridReachability::dump(FILE *fp) const
 {
- 	fprintf(fp,"state var ");
+	fprintf(fp,"state var ");
 	for(int i=0; i<stateVarNames.size()-1; ++i)
 	{
 		fprintf(fp, "%s,", stateVarNames[i].c_str());
@@ -11837,20 +9802,22 @@ void HybridReachability::dump(FILE *fp) const
 int HybridReachability::run()
 {
 	// normalize the candidate vectors
-	// for(int i=0; i<aggregationTemplate_candidates.size(); ++i)
-	// {
-	// 	for(int j=0; j<aggregationTemplate_candidates[i].size(); ++j)
-	// 	{
-	// 		for(int k=0; k<aggregationTemplate_candidates[i][j].size(); ++k)
-	// 		{
-	// 			aggregationTemplate_candidates[i][j][k].normalize();
-	// 		}
-	// 	}
-	// }
+	for(int i=0; i<aggregationTemplate_candidates.size(); ++i)
+	{
+		for(int j=0; j<aggregationTemplate_candidates[i].size(); ++j)
+		{
+			for(int k=0; k<aggregationTemplate_candidates[i][j].size(); ++k)
+			{
+				aggregationTemplate_candidates[i][j][k].normalize();
+			}
+		}
+	}
 
-	// set_default_template();
+	set_default_template();
 
-	// constructWeightTab();
+	constructWeightTab();
+
+
 /*
 	// ==== test begin====
 	// print out the jumps
@@ -12082,11 +10049,10 @@ void HybridReachability::plot_2D_interval_GNUPLOT(FILE *fp, const bool bProjecte
 
 void HybridReachability::plot_2D_octagon_GNUPLOT(FILE *fp, const bool bProjected) const
 {
-  //Code added by Rado -- this is a hack to avoid printing
-  //return;
+        //Code added by Rado -- this is a hack to avoid printing	
 	int x = outputAxes[0];
 	int y = outputAxes[1];
-	
+
 	Interval intZero;
 
 	int rangeDim = stateVarNames.size();
@@ -12212,33 +10178,13 @@ void HybridReachability::plot_2D_octagon_GNUPLOT(FILE *fp, const bool bProjected
 	{
 		tmvIter = fpIter->begin();
 		doIter = fpdoIter->begin();
-		
 		safetyIter = fpSafetyIter->begin();
 
 		for(; tmvIter != fpIter->end(); ++tmvIter, ++doIter, ++safetyIter)
 		{
-
 			int rangeDim = tmvIter->tms.size();
 			std::vector<Interval> box;
 			tmvIter->intEval(box, *doIter);
-
-			// //Code added by Rado
-			// TaylorModel tempTM = tmvIter->tms[0];
-			// std::string poly;
-			
-			// std::vector<std::string> varNames;
-			// varNames.push_back("f1");
-			// varNames.push_back("x1");
-			// varNames.push_back("c1");
-			// varNames.push_back("f");
-			// varNames.push_back("clock");
-			// varNames.push_back("t");
-			
-			// tempTM.expansion.toString(poly, varNames);
-			
-			// std::cout << "polynomial :" << poly << "\n";
-			// std::cout << "poly remainder: " << tempTM.remainder.width() << "\n";
-			// printf("interval 1: [%f, %f]\n", box[0].inf(), box[0].sup());
 
 			std::vector<Interval> new_domain;
 			std::vector<bool> bVecTemp;
@@ -12676,6 +10622,8 @@ void HybridReachability::plot_2D_interval_MATLAB(FILE *fp, const bool bProjected
 
 void HybridReachability::plot_2D_octagon_MATLAB(FILE *fp, const bool bProjected) const
 {
+
+  //Code added by Rado
 	int x = outputAxes[0];
 	int y = outputAxes[1];
 
@@ -13665,7 +11613,6 @@ void HybridReachability::set_default_template()
 
 void HybridReachability::constructWeightTab()
 {
-
 	int num_modes = system.modes.size();
 	int rangeDim = default_aggregation_template[0].size();
 
@@ -13694,11 +11641,10 @@ void HybridReachability::constructWeightTab()
 	// Matrix defaultWeightTab(num_default, num_default);
 	// for(int i=0; i<num_default; ++i)
 	// {
-
 	// 	for(int j=i+1; j<num_default; ++j)
 	// 	{
 	// 		// we assume that all the candidates and default template vectors are normalized
-	// 	        double weight = 1 - fabs(default_aggregation_template[i].innerProd(default_aggregation_template[j]));
+	// 		double weight = 1 - fabs(default_aggregation_template[i].innerProd(default_aggregation_template[j]));
 	// 		defaultWeightTab.set(weight, i, j);
 	// 		defaultWeightTab.set(weight, j, i);
 	// 	}

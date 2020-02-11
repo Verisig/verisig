@@ -47,6 +47,20 @@ int Monomial::degree() const
 	return d;
 }
 
+//code added by Rado
+std::vector<int> Monomial::getDegrees() const
+{
+        return degrees;
+}
+
+Interval Monomial::getCoefficient() const
+{
+
+        return coefficient;
+}
+
+//end of code added by Rado
+
 int Monomial::dimension() const
 {
 	return degrees.size();

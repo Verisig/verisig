@@ -1,0 +1,24 @@
+time: 0.5
+max jumps: 150
+gnuplot: 'octagon _f1, _f2'
+adaptive steps: '{min 1e-6, max 0.01}'
+precision: '100'
+
+init: 
+  mode: _cont_ACC
+  states:
+    - x1 in [90, 91]
+    - x2 in [32, 32.05]
+    - x3 in [0, 0]
+    - x4 in [10, 11]
+    - x5 in [30, 30.05]
+    - x6 in [0, 0]
+
+unsafe:
+  - mode: crash
+    states:
+    - _f1 <= 0
+
+print: 'on'
+plot: true
+dump: true

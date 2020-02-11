@@ -1,0 +1,25 @@
+time: 1
+max jumps: 1000
+gnuplot: 'octagon y0, y1'
+adaptive steps: '{min 1e-6, max 0.01}'
+precision: '200'
+
+init: 
+  mode: uuv_mode_1
+  states:
+    - u0 in [0,0]
+    - u1 in [1,1]
+    - u2 in [45.0, 45.0]
+    - y4 in [29,29.01]
+
+unsafe:
+  - mode: uuv_mode_1
+    states:
+    - y4 <= 10
+  - mode: uuv_mode_2
+    states:
+    - y4 >= 50
+
+print: 'on'
+plot: true
+dump: true

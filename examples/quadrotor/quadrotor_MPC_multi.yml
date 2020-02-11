@@ -1,11 +1,12 @@
 time: 6
 max jumps: 271
 gnuplot: octagon clock, _f1
+
 init: 
   mode: startmode
   states:
-    - x1 in [X1_LOWER_BOUND, X1_UPPER_BOUND]
-    - x2 in [X2_LOWER_BOUND, X2_UPPER_BOUND]
+    - x1 in [X1_LOWER, X1_UPPER]
+    - x2 in [X2_LOWER, X2_UPPER]
     - x3 in [0, 0]
     - x4 in [0, 0]
     - x5 in [0, 0]
@@ -44,6 +45,8 @@ unsafe:
     - x2 >= 0.32
     - x2 <= -0.32
     - x3 >= 0.32
-    - x3 <= -0.32   
+    - x3 <= -0.32
 
-print: 'off' 
+print: 'off'
+plot: false
+dump: false

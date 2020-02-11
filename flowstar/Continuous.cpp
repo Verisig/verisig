@@ -7,6 +7,7 @@
 ---*/
 
 #include "Continuous.h"
+#include "DNN.h"
 
 using namespace flowstar;
 
@@ -29,7 +30,7 @@ Flowpipe::Flowpipe(const std::vector<Interval> & box, const Interval & I)
 	std::vector<double> scalars;
 
 	domain.push_back(I);		// time interval
-
+	
 	// normalize the domain to [-1,1]^n
 	for(int i=0; i<rangeDim; ++i)
 	{
@@ -81,7 +82,7 @@ Flowpipe::Flowpipe(const TaylorModelVec & tmv_input, const std::vector<Interval>
 
 	TaylorModelVec tmvTemp(coefficients_of_tmvPre);
 	tmvPre = tmvTemp;
-
+	
 	normalize();
 }
 
@@ -5788,8 +5789,6 @@ int Flowpipe::advance_non_polynomial_taylor(Flowpipe & result, const std::vector
 // adaptive step sizes and fixed orders
 int Flowpipe::advance_non_polynomial_taylor(Flowpipe & result, const std::vector<std::string> & strOde, const std::vector<std::string> & strOde_centered, const int precondition, std::vector<Interval> & step_exp_table, std::vector<Interval> & step_end_exp_table, const double step, const double miniStep, const int order, const std::vector<Interval> & estimation, const std::vector<PolynomialConstraint> & invariant, const Interval & cutoff_threshold, const std::vector<bool> & constant, const std::vector<Interval> & constant_part) const
 {
-  
-        //printf("HERE3?\n");
 	int rangeDim = strOde.size();
 	Interval intZero, intOne(1), intUnit(-1,1);
 	result.clear();
@@ -5956,23 +5955,6 @@ int Flowpipe::advance_non_polynomial_taylor(Flowpipe & result, const std::vector
 		x.tms[i].remainder = estimation[i];
 	}
 
-	//Code added by Rado
-	// TaylorModel f1 = x0.tms[0];
-	// std::string poly;
-
-	// std::vector<std::string> varNames;
-	// varNames.push_back("f1");
-	// varNames.push_back("x1");
-	// varNames.push_back("c1");
-	// varNames.push_back("f");
-	// varNames.push_back("clock");
-	// varNames.push_back("t");
-
-	// f1.expansion.toString(poly, varNames);
-
-	// std::cout << "polynomial :" << poly << "\n";
-	// std::cout << "poly remainder: " << f1.remainder.width() << "\n";
-
 	TaylorModelVec tmvTemp;
 	x.Picard_non_polynomial_taylor_ctrunc_normal(tmvTemp, x0, strOde, step_exp_table, order, cutoff_threshold, constant, constant_part);
 
@@ -6016,7 +5998,6 @@ int Flowpipe::advance_non_polynomial_taylor(Flowpipe & result, const std::vector
 
 		construct_step_exp_table(step_exp_table, step_end_exp_table, newStep, 2*order);
 
-		//Rado, check this part
 		x.Picard_non_polynomial_taylor_ctrunc_normal(tmvTemp, x0, strOde, step_exp_table, order, cutoff_threshold, constant, constant_part);
 
 		// recompute the interval evaluation of the polynomial differences
@@ -6030,8 +6011,6 @@ int Flowpipe::advance_non_polynomial_taylor(Flowpipe & result, const std::vector
 			tmvTemp.tms[i].remainder += intDifferences[i];
 		}
 
-		//Code added by Rado
-		//printf("Conservative remainder: [%f, %f]\n", tmvTemp.tms[0].remainder.inf(), tmvTemp.tms[0].remainder.sup());
 		for(int i=0; i<rangeDim; ++i)
 		{
 			if( ! tmvTemp.tms[i].remainder.subseteq(x.tms[i].remainder) )
@@ -6051,9 +6030,6 @@ int Flowpipe::advance_non_polynomial_taylor(Flowpipe & result, const std::vector
 	for(int rSteps = 0; !bfinished && (rSteps <= MAX_REFINEMENT_STEPS); ++rSteps)
 	{
 		bfinished = true;
-
-		//Code added by Rado
-		//printf("remainder: %f\n", x.tms[0].remainder.width());
 
 		std::vector<Interval> newRemainders;
 		x.Picard_non_polynomial_taylor_only_remainder(newRemainders, x0, strOde, step_exp_table[1], order, constant);
@@ -6081,14 +6057,6 @@ int Flowpipe::advance_non_polynomial_taylor(Flowpipe & result, const std::vector
 			}
 		}
 	}
-
-	//Code added by Rado
-	// f1 = x.tms[0];
-
-	// f1.expansion.toString(poly, varNames);
-
-	// std::cout << "polynomial x:" << poly << "\n";
-	// std::cout << "poly x remainder: " << f1.remainder.width() << "\n";
 
 	result.tmvPre = x;
 	result.domain = domain;
@@ -14903,8 +14871,8 @@ ContinuousSystem & ContinuousSystem::operator = (const ContinuousSystem & system
 
 ContinuousReachability::ContinuousReachability()
 {
-	bPlot = false;
-	bDump = true;
+	bPlot = dnn::plottingEnabled;
+	bDump = dnn::dumpingEnabled;
 }
 
 ContinuousReachability::~ContinuousReachability()
@@ -21064,7 +21032,7 @@ bool ODE::reach_interval_remainder(std::list<Flowpipe> & flowpipes, Flowpipe & f
 	int rangeDim = derivatives.size();
 
 	Flowpipe newFlowpipe, currentFlowpipe = initial_set;
-
+	
 	for(int i=0; i<N; ++i)
 	{
 		int res = currentFlowpipe.advance_picard(newFlowpipe, derivatives, derivative_centers, crs.step_exp_table, crs.step_end_exp_table, crs.order, crs.estimation, crs.cutoff_threshold, constant, constant_part);
@@ -21075,7 +21043,7 @@ bool ODE::reach_interval_remainder(std::list<Flowpipe> & flowpipes, Flowpipe & f
 
 			currentFlowpipe = newFlowpipe;
 
-//			printf("Step %d.\n", i);
+			//printf("Step %d.\n", i+1);
 		}
 		else
 		{
@@ -21127,7 +21095,7 @@ bool ODE::reach_symbolic_remainder(std::list<Flowpipe> & flowpipes, Flowpipe & f
 				symb_rem.Phi_L.clear();
 			}
 
-//			printf("Step %d.\n", i);
+			printf("Step %d.\n", i+1);
 		}
 		else
 		{

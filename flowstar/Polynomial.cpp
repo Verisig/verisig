@@ -434,6 +434,7 @@ void HornerForm::insert_ctrunc(TaylorModel & result, const TaylorModelVec & vars
 
 		for(int i=1; i<hornerForms.size(); ++i)
 		{
+		  
 			hornerForms[i].insert_ctrunc(tmTemp, vars, varsPolyRange, domain, order, cutoff_threshold);	// recursive call
 			tmTemp.mul_insert_ctrunc_assign(vars.tms[i-1], varsPolyRange[i-1], domain, order, cutoff_threshold);
 			result.add_assign(tmTemp);
@@ -1743,7 +1744,7 @@ void Polynomial::toHornerForm(HornerForm & result) const
 
 		vlMono.push_back(lst_ith);
 	}
-
+	//printf("blah14\n");
 	for(int i=0; i<numVars; ++i)
 	{
 		Polynomial polyTemp(vlMono[i]);
@@ -1751,6 +1752,7 @@ void Polynomial::toHornerForm(HornerForm & result) const
 		polyTemp.toHornerForm(hf);
 		result.hornerForms.push_back(hf);
 	}
+	//printf("blah15\n");
 }
 
 void Polynomial::rmConstant()

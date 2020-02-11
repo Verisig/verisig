@@ -34,6 +34,9 @@ public class ComposedHybridSystem {
     public List<Jump> jumps;
     public Map<String,String> properties;
 
+    public boolean plottingEnabled = false;
+    public boolean dumpingEnabled = false;
+
     public static List<String> PROPERTY_ORDER = Arrays.asList("adaptive steps", "time", "remainder estimation", "identity precondition",
             "gnuplot", "fixed orders", "cutoff", "precision", "output", "max jumps", "print");
     public static Pattern ATAN_PATTERN = Pattern.compile("_arc_(_?[^_\\W]+)_(_?[^_\\W]+)(?:_([^_\\W]+))?");
@@ -52,18 +55,26 @@ public class ComposedHybridSystem {
         composeJumps();
 
         populateProperties();
+
+        if( config.containsKey("plot") ) {
+            plottingEnabled = (boolean) config.get("plot");
+        }
+
+        if( config.containsKey("dump") ) {
+            dumpingEnabled = (boolean) config.get("dump");
+        }
     }
 
     protected void composeVariables() {
         dnnStates = new ArrayList<>();
-
-        for( int i = 1; i <= dnn.numStates(); i++ ) {
-            dnnStates.add("_f" + i);
-        }
-
         plantStates = new ArrayList<>();
         for( String state : plant.states ) {
-            if( !dnnStates.contains(state) && !state.equals("clock")) {
+            if( state.startsWith("_f") )
+            {
+                dnnStates.add(state);
+            } else if( state.equals("clock") ) {
+                // ignore
+            } else {
                 plantStates.add(state);
             }
         }
@@ -79,36 +90,9 @@ public class ComposedHybridSystem {
     }
 
     protected List<Mode> createDNNModes() {
-        int numLayers = dnn.offsets.size();
-
         List<Mode> modes = new ArrayList<>();
         modes.add( createDNNMode(0));
-
-        int modeIndex = 1;
-        for( int i = 0; i < numLayers; i++ ) {
-            switch(dnn.activations.get(i+1)) {
-                case "Sigmoid":
-                    modes.add(createDNNMode(modeIndex, "_lin"));
-                    modeIndex++;
-                    modes.add(createDNNMode(modeIndex, "_sig"));
-                    break;
-                case "Tanh":
-                    modes.add(createDNNMode(modeIndex, "_lin"));
-                    modeIndex++;
-                    modes.add(createDNNMode(modeIndex, "_tanh"));
-                    break;
-                case "Relu":
-                    modes.add(createDNNMode(modeIndex, "_lin"));
-                    modeIndex++;
-                    modes.add(createDNNMode(modeIndex, "_relu"));
-                    break;
-                default:
-                    modes.add(createDNNMode(modeIndex));
-                    break;
-            }
-
-            modeIndex++;
-        }
+        modes.add( createDNNMode(1, "DNN"));
 
         return modes;
     }
@@ -199,15 +183,7 @@ public class ComposedHybridSystem {
             plant.nameMap.put(modeId, modeName);
         }
 
-        Mode mode = new Mode(modeName, dynamics, invariant);
-
-        for( String dnnState : dnnStates ) {
-            if( !mode.dynamics.containsKey(dnnState) ) {
-                mode.dynamics.put(dnnState, dnnState + "\' = 0");
-            }
-        }
-
-        return mode;
+        return new Mode(modeName, dynamics, invariant);
     }
 
     protected void composeJumps() {
@@ -218,163 +194,17 @@ public class ComposedHybridSystem {
     }
 
     protected List<Jump> createDNNJumps() {
-        int numLayers = dnn.offsets.size();
+        Jump jump = new Jump("m0", "DNNm1");
 
-        Map<String, String> weights = new HashMap<>();
-        for (Map.Entry<Integer, List<List<Double>>> entry : dnn.weights.entrySet()) {
-
-            for( int weightCount = 0; weightCount < entry.getValue().size(); weightCount++ ) {
-                int inputCount = 1;
-
-                for (Double weight : entry.getValue().get(weightCount)) {
-                    weights.put("w" + entry.getKey() + "_" + (weightCount + 1) + "_" + inputCount, String.format("%.8f", weight));
-                    inputCount++;
-                }
-            }
-        }
-
-        Map<String, String> offsets = new HashMap<>();
-        for (Map.Entry<Integer, List<Double>> entry : dnn.offsets.entrySet()) {
-            for(int neuron = 0; neuron < entry.getValue().size(); neuron++) {
-                offsets.put("b" + entry.getKey() + "_" + (neuron+1), String.format("%.8f", entry.getValue().get(neuron)));
-            }
-        }
-
-
-        List<Jump> jumps = new ArrayList<>();
-        int modeIndex = 0;
-
-        List<String> activationNames = Arrays.asList("Sigmoid", "Tanh", "Relu");
-        if( activationNames.contains(dnn.activations.get(1)) ) {
-            jumps.add(createDNNJump(dnn.weights.get(1), dnn.offsets.get(1), weights, offsets, 0, modeIndex, modeIndex+1, "Linear", "temp"));
-            modeIndex += 1;
-            jumps.add(createDNNJump(dnn.weights.get(1), dnn.offsets.get(1), weights, offsets, 0, modeIndex, modeIndex+1, "temp", dnn.activations.get(1)));
-            modeIndex += 1;
-        } else {
-            jumps.add(createDNNJump(dnn.weights.get(1), dnn.offsets.get(1), weights, offsets, 0, modeIndex, modeIndex+1, "Linear", dnn.activations.get(1)));
-            modeIndex += 1;
-        }
-
-        for( int layer = 0; layer < numLayers - 1; layer++ ) {
-            if( activationNames.contains(dnn.activations.get(layer+2)) ) {
-                jumps.add(createDNNJump(dnn.weights.get(layer+2), dnn.offsets.get(layer+2), weights, offsets, layer+1, modeIndex, modeIndex+1, dnn.activations.get(layer+1), "temp"));
-                modeIndex += 1;
-                jumps.add(createDNNJump(dnn.weights.get(layer+2), dnn.offsets.get(layer+2), weights, offsets, layer+1, modeIndex, modeIndex+1, "temp", dnn.activations.get(layer+2)));
-                modeIndex += 1;
-            } else {
-                jumps.add(createDNNJump(dnn.weights.get(layer+2), dnn.offsets.get(layer+2), weights, offsets, layer+1, modeIndex, modeIndex+1, dnn.activations.get(layer+1), dnn.activations.get(layer+2)));
-                modeIndex += 1;
-            }
-        }
-
-        return jumps;
-    }
-
-    protected Jump createDNNJump(List<List<Double>> nextWeights, List<Double> nextOffsets, Map<String, String> weights, Map<String, String> offsets, int curLayer, int curModeIndex, int nextModeIndex, String curActivation, String nextActivation) {
-        List<String> activationNames = Arrays.asList("Sigmoid", "Tanh", "Relu");
-        String prefix;
-
-        switch(curActivation) {
-            case "Sigmoid":
-                prefix = "_sig";
-                break;
-            case "Tanh":
-                prefix = "_tanh";
-                break;
-            case "temp":
-                prefix = "_lin";
-                break;
-            case "Relu":
-                prefix = "_relu";
-                break;
-            default:
-                prefix = "";
-                break;
-        }
-
-        String fromMode = prefix + "m" + curModeIndex;
-
-        switch(nextActivation) {
-            case "Sigmoid":
-                prefix = "_sig";
-                break;
-            case "Tanh":
-                prefix = "_tanh";
-                break;
-            case "temp":
-                prefix = "_lin";
-                break;
-            case "Relu":
-                prefix = "_relu";
-                break;
-            default:
-                prefix = "";
-                break;
-        }
-
-        String toMode = prefix + "m" + nextModeIndex;
-
-        Jump jump = new Jump(fromMode, toMode);
-        jump.guard.add("clock = 0");
-
-        for( int state = 0; state < nextWeights.size(); state++ ) {
-            if( activationNames.contains(nextActivation)) {
-                jump.reset.add("_f" + (state + 1) + "\' := _f" + (state + 1));
-            } else {
-                StringBuilder reset = new StringBuilder("_f" + (state+1) + "\' := ");
-
-                boolean isFirst = true;
-                boolean usedC = false;
-
-                for( int weightI = 0; weightI < nextWeights.get(state).size(); weightI++ ) {
-                    String weightName = "w" + (curLayer+1) + "_" + (state+1) + "_" + (weightI + 1);
-                    String weight = weights.getOrDefault(weightName, "0");
-
-                    if( weight.equals("0") ) {
-                        continue;
-                    }
-
-                    usedC = true;
-
-                    if( !isFirst ) {
-                        reset.append("+ ");
-                    }
-
-                    isFirst = false;
-
-                    reset.append(weight).append(" * _f").append(weightI + 1).append(" ");
-                }
-
-                if( !usedC ) {
-                    reset.append("0");
-                    jump.reset.add(reset.toString());
-                    continue;
-                }
-
-                String offsetName = "b" + (curLayer+1) + "_" + (state+1);
-                String offset = offsets.getOrDefault(offsetName, "0");
-
-                if( offset.equals("0") ) {
-                    jump.reset.add(reset.toString());
-                    continue;
-                }
-
-                if( !isFirst ) {
-                    reset.append("+ ");
-                }
-
-                reset.append(offset);
-                jump.reset.add(reset.toString());
-            }
-        }
-
-        for( int state = nextWeights.size(); state < dnn.numStates(); state++ ) {
-            jump.reset.add("_f" + (state+1) +"\' := 0");
-        }
+        /*for( int state = 0; state < dnn.numStates(); state++ ) {
+            jump.reset.add("_f" + (state+1) +"\' := _f" + (state+1));
+        }*/
 
         jump.reset.add("clock\' := 0");
+        List<Jump> jumps = new ArrayList<>();
+        jumps.add(jump);
 
-        return jump;
+        return jumps;
     }
 
     protected List<Jump> createPlantJumps() {
@@ -399,28 +229,8 @@ public class ComposedHybridSystem {
 
     protected List<Jump> createDNN2PlantJumps() {
         List<Jump> jumps = new ArrayList<>();
-        String lastActivation = dnn.activations.get(dnn.activations.size());
 
-        String prefix;
-        switch(lastActivation) {
-            case "Sigmoid":
-                prefix = "_sig";
-                break;
-            case "Tanh":
-                prefix = "_tanh";
-                break;
-            case "temp":
-                prefix = "_lin";
-                break;
-            case "Relu":
-                prefix = "_relu";
-                break;
-            default:
-                prefix = "";
-                break;
-        }
-
-        String dnnMode = prefix + "m" + dnn.numLayers();
+        String dnnMode = "DNNm1";
         for (Map.Entry<Integer, List<Map<String, Object>>> entry : plant.glue.get("dnn2plant").entrySet()) {
             String toMode = plant.nameMap.get(entry.getKey());
 
@@ -456,7 +266,7 @@ public class ComposedHybridSystem {
         properties.put("remainder estimation", "1e-1");
         properties.put("identity precondition", "");
         properties.put("gnuplot", "octagon clock, _f1");
-        properties.put("fixed orders", "3");
+        properties.put("fixed orders", "4");
         properties.put("cutoff", "1e-18");
         properties.put("precision", "100");
         properties.put("output", "autosig");

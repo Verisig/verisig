@@ -203,7 +203,20 @@ public class Main {
                 if(verbose) {
                     System.out.println("Running flowstar command: " + flowstarCommand + " on composed system");
                 }
-                SystemCommandExecutor executor = new SystemCommandExecutor(Arrays.asList(flowstarCommand), true);
+
+                List<String> command = new ArrayList<>();
+                command.add(flowstarCommand);
+
+                if( system.plottingEnabled ) {
+                    command.add("-p");
+                }
+
+                if( system.dumpingEnabled ) {
+                    command.add("-d");
+                }
+
+                command.add(dnnPath.toString());
+                SystemCommandExecutor executor = new SystemCommandExecutor(command, true);
                 executor.executeCommand(byteArrayOutputStream.toString());
 
                 if(verbose) {

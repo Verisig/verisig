@@ -1,0 +1,261 @@
+<?xml version="1.0" encoding="iso-8859-1"?>
+<sspaceex xmlns="http://www-verimag.imag.fr/xml-namespaces/sspaceex" version="0.2" math="SpaceEx">
+  <component id="uuv">
+    <param name="clock" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="x0" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="x1" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="x2" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="x3" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="u0" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="u1" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="u2" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="y0" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="y1" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="y2" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="y3" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="y4" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="e0" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="e1" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="e2" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="t1" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="t2" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="y_i1" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="y_i2" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="y_i3" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="A00" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="A01" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="A02" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="A03" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="A10" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="A11" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="A12" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="A13" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="A20" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="A21" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="A22" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="A23" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="A30" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="A31" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="A32" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="A33" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="B00" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="B01" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="B02" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="B10" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="B11" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="B12" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="B20" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="B21" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="B22" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="B30" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="B31" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="B32" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="C00" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="C01" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="C02" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="C03" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="C10" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="C11" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="C12" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="C13" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="C20" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="C21" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="C22" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="C23" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="D00" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="D01" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="D02" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="D10" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="D11" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="D12" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="D20" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="D21" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="D22" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="K00" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="K01" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="K02" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="K10" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="K11" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="K12" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="K20" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="K21" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="K22" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="K30" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="K31" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="K32" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="i4" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="i5" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="i6" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="i7" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="i8" type="real" local="true" d1="1" d2="1" dynamics="const" />
+    <param name="_f1" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="_f2" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="_f3" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <location id="1" name="uuv_mode_1" x="197.0" y="297.0">
+      <invariant>clock &lt;= 0</invariant>
+      <flow>clock' == 1</flow>
+    </location>
+    <location id="2" name="uuv_mode_2" x="207.0" y="597.0">
+      <invariant>clock &lt;= 0</invariant>
+      <flow>clock' == 1</flow>
+    </location>
+    <location id="3" name="_cos_t1_y0_0" x="488.0" y="591.0">
+      <invariant>clock &lt;= 0</invariant>
+      <flow>clock' == 1</flow>
+    </location>
+    <location id="4" name="_sin_t2_y0_0" x="730.0" y="580.0">
+      <invariant>clock &lt;= 0</invariant>
+      <flow>clock' == 1</flow>
+    </location>
+    <location id="5" name="temp1" x="1019.0" y="587.0">
+      <invariant>clock &lt;= 0</invariant>
+      <flow>clock' == 1</flow>
+    </location>
+    <location id="6" name="_div_t1_t1_0" x="1000.0" y="288.0">
+      <invariant>clock &lt;= 0</invariant>
+      <flow>clock' == 1</flow>
+    </location>
+    <location id="7" name="_store_temp2" x="789.0" y="88.0">
+      <invariant>clock &lt;= 0</invariant>
+      <flow>clock' == 1</flow>
+    </location>
+    <location id="8" name="DNN" x="486.0" y="72.0">
+      <invariant>clock &lt;= 0</invariant>
+      <flow>clock' == 1</flow>
+    </location>
+    <location id="9" name="_load_temp" x="228.0" y="128.0">
+      <invariant>clock &lt;= 0</invariant>
+      <flow>clock' == 1</flow>
+    </location>
+    <transition source="1" target="2">
+      <guard>clock = 0</guard>
+      <assignment>x0 :=  x0 * A00 + x1 * A01 + x2 * A02 + x3 * A03 + u0 * B00 + u1 * B01 + u2 * B02 + e0 * K00 + e1 * K01 + e2 * K02 &amp; 
+x1 :=  x0 * A10 + x1 * A11 + x2 * A12 + x3 * A13 + u0 * B10 + u1 * B11 + u2 * B12 + e0 * K10 + e1 * K11 + e2 * K12 &amp; 
+x2 :=  x0 * A20 + x1 * A21 + x2 * A22 + x3 * A23 + u0 * B20 + u1 * B21 + u2 * B22 + e0 * K20 + e1 * K21 + e2 * K22 &amp; 
+x3 :=  x0 * A30 + x1 * A31 + x2 * A32 + x3 * A33 + u0 * B30 + u1 * B31 + u2 * B32 + e0 * K30 + e1 * K31 + e2 * K32 &amp; 
+y0 :=  x0 * C00 + x1 * C01 + x2 * C02 + x3 * C03 + u0 * D00 + u1 * D01 + u2 * D02 + e0 &amp; 
+y1 :=  x0 * C10 + x1 * C11 + x2 * C12 + x3 * C13 + u0 * D10 + u1 * D11 + u2 * D12 + e1 &amp; 
+y2 :=  x0 * C20 + x1 * C21 + x2 * C22 + x3 * C23 + u0 * D20 + u1 * D21 + u2 * D22 + e2 &amp; 
+clock := 0</assignment>
+      <labelposition x="-64.0" y="-70.0" width="314.0" height="142.0" />
+    </transition>
+    <transition source="2" target="3">
+      <guard>clock &gt;=0</guard>
+      <assignment>clock := 0</assignment>
+      <labelposition x="0.0" y="0.0" width="82.0" height="56.0" />
+    </transition>
+    <transition source="3" target="4">
+      <guard>clock &gt;=0</guard>
+      <assignment>clock := 0</assignment>
+      <labelposition x="-40.0" y="0.0" width="98.0" height="56.0" />
+    </transition>
+    <transition source="4" target="5">
+      <guard>clock &gt;=0</guard>
+      <assignment>y3 := y3 + (y1 * t1) &amp;
+y4 := y4 - (y1 * t2) &amp;
+clock := 0</assignment>
+      <labelposition x="-91.0" y="-35.0" width="178.0" height="102.0" />
+    </transition>
+    <transition source="5" target="6">
+      <guard>clock = 0</guard>
+      <assignment>y_i1 := -1 * y0 &amp;
+clock := 0</assignment>
+      <labelposition x="-143.0" y="-62.0" width="138.0" height="98.0" />
+    </transition>
+    <transition source="6" target="7">
+      <guard>clock &gt;= 0</guard>
+      <assignment>y_i2 := -1 * y4 * t1 &amp;
+y_i3 := y4 * t1 &amp;
+clock := 0</assignment>
+      <labelposition x="10.0" y="-104.0" width="130.0" height="126.0" />
+    </transition>
+    <transition source="7" target="8">
+      <assignment>_f1 := y_i1 &amp;
+_f2 := y_i2 &amp;
+_f3 := y_i3 &amp;
+clock := 0</assignment>
+      <labelposition x="0.0" y="0.0" width="120.0" height="174.0" />
+    </transition>
+    <transition source="8" target="9">
+      <assignment>u0 := y0 + (_f1 * 0.0872665) &amp; 
+clock := 0</assignment>
+      <labelposition x="-118.0" y="-87.0" width="202.0" height="98.0" />
+    </transition>
+    <transition source="9" target="1">
+      <guard>clock &gt;=0</guard>
+      <assignment>clock := 0</assignment>
+      <labelposition x="-36.0" y="-44.0" width="102.0" height="80.0" />
+    </transition>
+  </component>
+  <component id="constants">
+    <bind component="uuv" as="uuv_1" x="240.0" y="10.0">
+      <map key="A00">0.632888959209279</map>
+      <map key="A01">-0.165596499968217</map>
+      <map key="A02">-0.034643076779789</map>
+      <map key="A03">-0.796223932744187</map>
+      <map key="A10">0.647923331793540</map>
+      <map key="A11">1.108929309666846</map>
+      <map key="A12">0.056354371144492</map>
+      <map key="A13">1.820199650113107</map>
+      <map key="A20">0.004962788555142</map>
+      <map key="A21">-0.021446960310412</map>
+      <map key="A22">0.794035659876450</map>
+      <map key="A23">-0.031184110908320</map>
+      <map key="A30">-0.194259272543595</map>
+      <map key="A31">-0.427786804783555</map>
+      <map key="A32">-0.024485643990761</map>
+      <map key="A33">0.007801163899358</map>
+      <map key="B00">0.006991036639857</map>
+      <map key="B01">-0.000023350922534</map>
+      <map key="B02">0.000000000000000</map>
+      <map key="B10">-0.004176202824080</map>
+      <map key="B11">-0.000197628817987</map>
+      <map key="B12">0.000000000000000</map>
+      <map key="B20">-0.000753874389887</map>
+      <map key="B21">-0.003068926529581</map>
+      <map key="B22">0.000000000000000</map>
+      <map key="B30">-0.004198149910992</map>
+      <map key="B31">0.000084503331039</map>
+      <map key="B32">0.000000000000000</map>
+      <map key="C00">18.753343660923278</map>
+      <map key="C01">1.564979550278312</map>
+      <map key="C02">0.173846612763143</map>
+      <map key="C03">-0.131357399660843</map>
+      <map key="C10">-0.040213280908787</map>
+      <map key="C11">-1.607689040881914</map>
+      <map key="C12">-70.832197478465872</map>
+      <map key="C13">-0.061482474227400</map>
+      <map key="C20">1.361719441039782</map>
+      <map key="C21">-14.019315925275073</map>
+      <map key="C22">0.173809405429294</map>
+      <map key="C23">-0.306802569834770</map>
+      <map key="D00">0.000000000000000</map>
+      <map key="D01">0.000000000000000</map>
+      <map key="D02">0.000000000000000</map>
+      <map key="D10">0.000000000000000</map>
+      <map key="D11">0.000000000000000</map>
+      <map key="D12">0.000000000000000</map>
+      <map key="D20">0.000000000000000</map>
+      <map key="D21">0.000000000000000</map>
+      <map key="D22">1.000000000000000</map>
+      <map key="K00">0.048867016556232</map>
+      <map key="K01">0.000127261080726</map>
+      <map key="K02">0.029780655249813</map>
+      <map key="K10">0.006676950962099</map>
+      <map key="K11">0.000105417200284</map>
+      <map key="K12">-0.109117103586846</map>
+      <map key="K20">0.000614989698600</map>
+      <map key="K21">-0.011672555539215</map>
+      <map key="K22">0.003426553122691</map>
+      <map key="K30">-0.012231805218711</map>
+      <map key="K31">0.000525029380956</map>
+      <map key="K32">0.028412040539361</map>
+      <map key="i4">1.0</map>
+      <map key="i5">40.0</map>
+      <map key="i6">40.0</map>
+      <map key="i7">-60.0</map>
+      <map key="i8">-60.0</map>
+    </bind>
+  </component>
+</sspaceex>
+

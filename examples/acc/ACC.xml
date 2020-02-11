@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="iso-8859-1"?>
+<sspaceex xmlns="http://www-verimag.imag.fr/xml-namespaces/sspaceex" math="SpaceEx" version="0.2">
+  <component id="ACC_sys">
+    <param controlled="false" d1="1" d2="1" dynamics="any" local="true" name="x1" type="real" />
+    <param controlled="false" d1="1" d2="1" dynamics="any" local="true" name="x2" type="real" />
+    <param controlled="false" d1="1" d2="1" dynamics="any" local="true" name="x3" type="real" />
+    <param controlled="false" d1="1" d2="1" dynamics="any" local="true" name="x4" type="real" />
+    <param controlled="false" d1="1" d2="1" dynamics="any" local="true" name="x5" type="real" />
+    <param controlled="false" d1="1" d2="1" dynamics="any" local="true" name="x6" type="real" />
+    <param name="clock" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="_f1" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="_f2" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="_f3" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="_f4" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="_f5" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="a_ego" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <param name="worldtime" type="real" local="true" d1="1" d2="1" dynamics="any" controlled="false" />
+    <location id="1" name="_cont_ACC" x="369.0" y="565.0" width="160.0" height="130.0">
+      <invariant>clock &lt;= 0.1</invariant>
+      <flow>x1' == x2 &amp;
+ x2' == x3 &amp;
+ x3' == -2.0 * x3 - 0.0001 * x2 * x2 - 4.0 &amp;
+ x4' == x5 &amp;
+ x5' == x6 &amp;
+ x6' == 2.0 * a_ego - 2.0 * x6 - 0.0001 * x5 * x5 &amp;
+clock' == 1 &amp;
+a_ego' == 0 &amp;
+worldtime' == 1</flow>
+    </location>
+    <location id="2" name="DNN" x="364.0" y="121.0" width="164.0" height="132.0" />
+    <location id="3" name="crash" x="712.0" y="564.0">
+      <invariant>clock &lt;= 1</invariant>
+      <flow>clock' == 1</flow>
+    </location>
+    <transition source="1" target="2">
+      <guard>clock = 0.1</guard>
+      <assignment>_f1 := 30 &amp;
+_f2 := 1.4 &amp;
+_f3 := x5 &amp;
+_f4 := x1 - x4 &amp;
+_f5 := x2 - x5 &amp;
+clock := 0</assignment>
+      <labelposition x="-133.0" y="2.0" width="134.0" height="148.0" />
+      <middlepoint x="266.5" y="297.0" />
+    </transition>
+    <transition source="2" target="1">
+      <assignment>clock := 0 &amp;
+a_ego := _f1</assignment>
+      <labelposition x="-13.0" y="-57.0" width="104.0" height="86.0" />
+      <middlepoint x="486.5" y="290.0" />
+    </transition>
+    <transition source="1" target="3">
+      <guard>x1 - x4 - 10 - 1.4 * x5 &lt;= 0</guard>
+      <assignment>_f1 := x1 - x4 - 10 - 1.4 * x5 &amp;
+clock := 0</assignment>
+      <labelposition x="-37.0" y="-85.0" width="128.0" height="90.0" />
+    </transition>
+  </component>
+  <component id="ACC_net">
+    <bind component="ACC_sys" as="ACC_sys_1" x="326.0" y="291.0" width="264.0" height="162.0" />
+  </component>
+</sspaceex>
+
