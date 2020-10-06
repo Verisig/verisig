@@ -54,7 +54,7 @@ verisig [options...] spaceex_xml dnn_yml
 The following command can be run from the local directory to verify a single interval of the cartpole example:
 
 ```
-./verisig --flowstar-command ./flowstar/flowstar examples/mountain_car/MC.xml examples/mountain_car/sig16x16.yml
+./verisig --flowstar-cmd ./flowstar/flowstar examples/mountain_car/MC.xml examples/mountain_car/sig16x16.yml
 ```
 
 Look at the file __examples/mountain_car/multi_runner.py__ to see how one can verify the entire range of the unsafe set that was used in the case-study.
