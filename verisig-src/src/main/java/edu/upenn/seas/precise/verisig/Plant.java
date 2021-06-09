@@ -24,13 +24,11 @@ import java.util.Map;
 public class Plant {
     public List<String> states;
     public Map<Integer, Map<String, Object>> modes;
-    public Map<String, Map<Integer, List<Map<String, Object>>>> glue;
     public Map<Integer, String> nameMap;
 
-    public Plant(List<String> states, Map<Integer, Map<String, Object>> modes, Map<String, Map<Integer, List<Map<String, Object>>>> glue, Map<Integer, String> nameMap) {
+    public Plant(List<String> states, Map<Integer, Map<String, Object>> modes, Map<Integer, String> nameMap) {
         this.states = states;
         this.modes = modes;
-        this.glue = glue;
         this.nameMap = nameMap;
     }
 }

@@ -8,6 +8,9 @@
 
 #include "Polynomial.h"
 #include "TaylorModel.h"
+#include "DNNResets.h"
+
+extern std::map<int, std::vector<std::string>> dnn::augmentedVarNames;
 
 using namespace flowstar;
 
@@ -371,6 +374,7 @@ void HornerForm::insert(TaylorModel & result, const TaylorModelVec & vars, const
 
 		for(int i=1; i<hornerForms.size(); ++i)
 		{
+
 			hornerForms[i].insert(tmTemp, vars, varsPolyRange, domain, cutoff_threshold);	// recursive call
 			tmTemp.mul_insert_assign(vars.tms[i-1], varsPolyRange[i-1], domain, cutoff_threshold);
 			result.add_assign(tmTemp);
@@ -434,10 +438,11 @@ void HornerForm::insert_ctrunc(TaylorModel & result, const TaylorModelVec & vars
 
 		for(int i=1; i<hornerForms.size(); ++i)
 		{
-		  
+
 			hornerForms[i].insert_ctrunc(tmTemp, vars, varsPolyRange, domain, order, cutoff_threshold);	// recursive call
 			tmTemp.mul_insert_ctrunc_assign(vars.tms[i-1], varsPolyRange[i-1], domain, order, cutoff_threshold);
 			result.add_assign(tmTemp);
+
 		}
 	}
 }
@@ -805,6 +810,43 @@ void HornerForm::dump(FILE *fp, const std::vector<std::string> & varNames) const
 	fprintf(fp, " ) ");
 }
 
+void HornerForm::print(const std::vector<std::string> & varNames) const
+{
+	int numVars = hornerForms.size();
+
+	Interval intZero;
+	bool bPlus = false;
+
+	printf(" ( ");
+	if(!constant.subseteq(intZero))
+	{
+		bPlus = true;
+		printf("%13.10f ", constant.inf());
+	}
+
+	if(numVars == 0)
+	{
+		printf(" ) ");
+		return;
+	}
+
+	for(int i=0; i<numVars; ++i)
+	{
+		if(hornerForms[i].hornerForms.size() != 0 || !hornerForms[i].constant.subseteq(intZero))
+		{
+			if(bPlus)		// only used to print the "+" symbol
+			       printf(" + ");
+			else
+				bPlus = true;
+
+			hornerForms[i].print(varNames);
+			printf("* %s", varNames[i].c_str());
+		}
+	}
+
+	printf(" )\n ");
+}
+
 HornerForm & HornerForm::operator = (const HornerForm & hf)
 {
 	if(this == &hf)
@@ -964,6 +1006,16 @@ Polynomial::Polynomial(const UnivariatePolynomial & up, const int numVars)
 			monomials.push_back(monomial);
 		}
 	}
+}
+
+Polynomial::Polynomial(const NNPolynomial & polynomial)
+{
+
+        for (auto it = polynomial.monomials_map.begin(); it != polynomial.monomials_map.end(); ++it){
+	        monomials.push_back(Monomial((*it->second)));
+	}
+
+	reorder();
 }
 
 Polynomial::Polynomial(const Polynomial & polynomial):monomials(polynomial.monomials)
@@ -1431,14 +1483,34 @@ Polynomial & Polynomial::operator *= (const Polynomial & polynomial)
 		return *this;
 	}
 
+	// original code
+	// std::list<Monomial>::const_iterator iterB;	// polynomial B
+
+	// for(iterB = polynomial.monomials.begin(); iterB != polynomial.monomials.end(); ++iterB)
+	// {
+	// 	Polynomial polyTemp = *this;
+	// 	polyTemp.mul_assign(*iterB);
+	// 	result += polyTemp;
+	// }
+	
+	// code added by Rado
+	std::vector<Monomial> all_monomials;
+	std::list<Monomial>::const_iterator iterA;	// polynomial A
 	std::list<Monomial>::const_iterator iterB;	// polynomial B
 
-	for(iterB = polynomial.monomials.begin(); iterB != polynomial.monomials.end(); ++iterB)
-	{
-		Polynomial polyTemp = *this;
-		polyTemp.mul_assign(*iterB);
-		result += polyTemp;
+	for(iterA = monomials.begin(); iterA != monomials.end(); ++iterA){
+	        for(iterB = polynomial.monomials.begin(); iterB != polynomial.monomials.end(); ++iterB){
+		        Monomial tempMono = (*iterA) * (*iterB);
+			all_monomials.push_back(tempMono);
+		}
 	}
+
+	for(int i = 0; i < all_monomials.size(); i++){
+
+	        result.add_assign(all_monomials[i]);
+	  
+	}
+	// end of code added by Rado	
 
 	*this = result;
 	return *this;

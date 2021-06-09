@@ -1,9 +1,9 @@
 CXX = g++
 include makefile.local
 LIBS = -lmpfr -lgmp -lgsl -lgslcblas -lm -lglpk -lyaml-cpp
-CFLAGS = -I . -I $(GMP_HOME) -g -O3 -std=c++11
-LINK_FLAGS = -g -L $(GMP_LIB_HOME)
-OBJS = Interval.o Matrix.o Polynomial.o Monomial.o Constraints.o Geometry.o TaylorModel.o Continuous.o Hybrid.o expression.o DNN.o AddedResets.o
+CFLAGS = -I . -I $(GMP_HOME) -I ./ctpl -g -O3 -std=c++11
+LINK_FLAGS = -g -L $(GMP_LIB_HOME) -pthread
+OBJS = Interval.o Matrix.o Polynomial.o Monomial.o Constraints.o Geometry.o TaylorModel.o Continuous.o expression.o DNNResets.o DNN.o AddedResets.o Hybrid.o NNTaylorModel.o NNPolynomial.o NNMonomial.o
 
 all: flowstar lib
 

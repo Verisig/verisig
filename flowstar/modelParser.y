@@ -10,6 +10,7 @@
 
 	#include "modelParser.h"
 	#include "DNN.h"
+  	#include "DNNResets.h"
 
 	extern int yyerror(const char *);
 	extern int yyerror(std::string);

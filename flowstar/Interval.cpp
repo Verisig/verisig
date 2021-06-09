@@ -273,6 +273,11 @@ void Real::sqrt_assign()
 {
 	mpfr_sqrt(value, value, MPFR_RNDN);
 }
+
+void Real::atan_assign()
+{
+	mpfr_atan(value, value, MPFR_RNDN);
+}
 /*
 Real & Real::operator *= (const Interval & I)
 {
@@ -545,6 +550,13 @@ void Interval::set(const Real & r)
 	mpfr_set(up, r.value, MPFR_RNDU);
 }
 
+void Interval::set(const Interval & I)
+{
+        mpfr_set(lo, I.lo, MPFR_RNDD);
+	mpfr_set(up, I.up, MPFR_RNDU);
+}
+
+
 void Interval::setInf(const double l)
 {
 	mpfr_set_d(lo, l, MPFR_RNDD);
@@ -656,20 +668,11 @@ double Interval::midpoint() const
 
 void Interval::midpoint(Interval & M) const
 {
-	mpfr_t tmp;
-	mpfr_inits2(intervalNumPrecision, tmp, (mpfr_ptr) 0);
+	mpfr_add(M.up, lo, up, MPFR_RNDU);
+	mpfr_div_d(M.up, M.up, 2.0, MPFR_RNDU);
 
-	mpfr_add(tmp, lo, up, MPFR_RNDU);
-	mpfr_div_d(tmp, tmp, 2.0, MPFR_RNDU);
-
-	mpfr_set(M.up, tmp, MPFR_RNDU);
-
-	mpfr_add(tmp, lo, up, MPFR_RNDD);
-	mpfr_div_d(tmp, tmp, 2.0, MPFR_RNDD);
-
-	mpfr_set(M.lo, tmp, MPFR_RNDD);
-
-	mpfr_clear(tmp);
+	mpfr_add(M.lo, lo, up, MPFR_RNDD);
+	mpfr_div_d(M.lo, M.lo, 2.0, MPFR_RNDD);
 }
 
 void Interval::midpoint(Real & mid) const
@@ -995,6 +998,14 @@ bool Interval::subseteq(const Interval & I) const
 		return false;
 }
 
+bool Interval::subsetZero() const
+{
+        if( (mpfr_cmp_ui(lo, 0) >= 0) && (mpfr_cmp_ui(up, 0) <= 0) )
+		return true;
+	else
+		return false;
+}
+
 bool Interval::supseteq(const Interval & I) const
 {
 	if( (mpfr_cmp(lo, I.lo) <= 0) && (mpfr_cmp(up, I.up) >= 0) )
@@ -1012,6 +1023,60 @@ bool Interval::valid() const
 	else
 	{
 		return false;
+	}
+}
+
+void Interval::mul_01()
+{
+
+        if(mpfr_cmp_ui(lo, 0) > 0){
+	        mpfr_set_d(lo, 0.0, MPFR_RNDD);
+	}
+
+	else if(mpfr_cmp_ui(up, 0L) < 0){
+	        mpfr_set_d(up, 0.0, MPFR_RNDU);
+	}
+	  
+	else{ 
+	        //Interval is both positive and negative: do nothing
+	}
+}
+
+void Interval::mul_m11()
+{
+
+        if(mpfr_cmp_ui(lo, 0) > 0){
+	        mpfr_t tmp;
+		mpfr_inits2(intervalNumPrecision, tmp, (mpfr_ptr) 0);
+		mpfr_set(tmp, up, MPFR_RNDU);
+		mpfr_mul_si(lo, tmp, -1L, MPFR_RNDD);
+
+		mpfr_clear(tmp);
+	}
+
+	else if(mpfr_cmp_ui(up, 0L) < 0){
+	        mpfr_t tmp;
+		mpfr_inits2(intervalNumPrecision, tmp, (mpfr_ptr) 0);
+		mpfr_set(tmp, lo, MPFR_RNDD);
+		mpfr_mul_si(up, tmp, -1L, MPFR_RNDU);
+
+		mpfr_clear(tmp);
+	}
+	  
+	else{ //Interval is both positive and negative
+	        mpfr_t tmp;
+		mpfr_inits2(intervalNumPrecision, tmp, (mpfr_ptr) 0);		
+		mpfr_abs(tmp, lo, MPFR_RNDU);
+
+		if(mpfr_cmp(tmp, up) > 0){ // set up to -1 * lo
+		        mpfr_set(tmp, lo, MPFR_RNDD);
+			mpfr_mul_si(up, tmp, -1L, MPFR_RNDU);
+		}
+		else{ // set lo to -1 * up
+		        mpfr_set(tmp, up, MPFR_RNDU);
+			mpfr_mul_si(lo, tmp, -1L, MPFR_RNDD);
+		}
+		mpfr_clear(tmp);		
 	}
 }
 
@@ -1111,89 +1176,127 @@ Interval & Interval::operator -= (const double c)
 
 Interval & Interval::operator *= (const Interval & I)
 {
-	mpfr_t result_lo, result_up, tmp1, tmp2;
-	mpfr_inits2(intervalNumPrecision, result_lo, result_up, tmp1, tmp2, (mpfr_ptr) 0);
 
 	if(mpfr_cmp_ui(lo, 0L) >= 0)
 	{
 		if(mpfr_cmp_ui(I.lo, 0L) >= 0)
 		{
-			mpfr_mul(result_lo, lo, I.lo, MPFR_RNDD);
-			mpfr_mul(result_up, up, I.up, MPFR_RNDU);
+			mpfr_mul(lo, lo, I.lo, MPFR_RNDD);
+			mpfr_mul(up, up, I.up, MPFR_RNDU);
 		}
 		else if(mpfr_cmp_ui(I.up, 0L) <= 0)
 		{
+		        mpfr_t result_lo, result_up;
+			mpfr_inits2(intervalNumPrecision, result_lo, result_up, (mpfr_ptr) 0);
+		  
 			mpfr_mul(result_lo, up, I.lo, MPFR_RNDD);
 			mpfr_mul(result_up, lo, I.up, MPFR_RNDU);
+
+			//mpfr_set(lo, result_lo, MPFR_RNDD);
+			//mpfr_set(up, result_up, MPFR_RNDU);
+
+			mpfr_swap(lo, result_lo);
+			mpfr_swap(up, result_up);
+
+			mpfr_clears(result_lo, result_up, (mpfr_ptr) 0);
 		}
 		else
 		{
-			mpfr_mul(result_lo, up, I.lo, MPFR_RNDD);
-			mpfr_mul(result_up, up, I.up, MPFR_RNDU);
+			mpfr_mul(lo, up, I.lo, MPFR_RNDD);
+			mpfr_mul(up, up, I.up, MPFR_RNDU);
 		}
 	}
 	else if(mpfr_cmp_ui(up, 0L) <= 0)
 	{
 		if(mpfr_cmp_ui(I.lo, 0L) >= 0)
 		{
-			mpfr_mul(result_lo, lo, I.up, MPFR_RNDD);
-			mpfr_mul(result_up, up, I.lo, MPFR_RNDU);
+			mpfr_mul(lo, lo, I.up, MPFR_RNDD);
+			mpfr_mul(up, up, I.lo, MPFR_RNDU);
 		}
 		else if(mpfr_cmp_ui(I.up, 0L) <= 0)
 		{
+
+		        mpfr_t result_lo, result_up;
+			mpfr_inits2(intervalNumPrecision, result_lo, result_up, (mpfr_ptr) 0);
+		  
 			mpfr_mul(result_lo, up, I.up, MPFR_RNDD);
 			mpfr_mul(result_up, lo, I.lo, MPFR_RNDU);
+
+			//mpfr_set(lo, result_lo, MPFR_RNDD);
+			//mpfr_set(up, result_up, MPFR_RNDU);
+
+			mpfr_swap(lo, result_lo);
+			mpfr_swap(up, result_up);
+
+			mpfr_clears(result_lo, result_up, (mpfr_ptr) 0);		
 		}
 		else
 		{
-			mpfr_mul(result_lo, lo, I.up, MPFR_RNDD);
-			mpfr_mul(result_up, lo, I.lo, MPFR_RNDU);
+			mpfr_mul(up, lo, I.lo, MPFR_RNDU);		  
+			mpfr_mul(lo, lo, I.up, MPFR_RNDD);
 		}
 	}
 	else
 	{
+	  
 		if(mpfr_cmp_ui(I.lo, 0L) >= 0)
 		{
-			mpfr_mul(result_lo, lo, I.up, MPFR_RNDD);
-			mpfr_mul(result_up, up, I.up, MPFR_RNDU);
+			mpfr_mul(lo, lo, I.up, MPFR_RNDD);
+			mpfr_mul(up, up, I.up, MPFR_RNDU);
 		}
 		else if(mpfr_cmp_ui(I.up, 0L) <= 0)
 		{
+
+		        mpfr_t result_lo, result_up;
+			mpfr_inits2(intervalNumPrecision, result_lo, result_up, (mpfr_ptr) 0);
+		  
 			mpfr_mul(result_lo, up, I.lo, MPFR_RNDD);
 			mpfr_mul(result_up, lo, I.lo, MPFR_RNDU);
+
+			//mpfr_set(lo, result_lo, MPFR_RNDD);
+			//mpfr_set(up, result_up, MPFR_RNDU);
+
+			mpfr_swap(lo, result_lo);
+			mpfr_swap(up, result_up);
+
+			mpfr_clears(result_lo, result_up, (mpfr_ptr) 0);
+			
 		}
 		else
 		{
+		        mpfr_t tmp1, tmp2, tmp3, tmp4;
+			mpfr_inits2(intervalNumPrecision, tmp1, tmp2, tmp3, tmp4, (mpfr_ptr) 0);
+		  
 			mpfr_mul(tmp1, lo, I.up, MPFR_RNDD);
 			mpfr_mul(tmp2, up, I.lo, MPFR_RNDD);
+			mpfr_mul(tmp3, lo, I.lo, MPFR_RNDU);
+			mpfr_mul(tmp4, up, I.up, MPFR_RNDU);
 
 			if(mpfr_cmp(tmp1, tmp2) > 0)
 			{
-				mpfr_set(result_lo, tmp2, MPFR_RNDD);
+			  //mpfr_set(lo, tmp2, MPFR_RNDD);
+				mpfr_swap(lo, tmp2);
 			}
 			else
 			{
-				mpfr_set(result_lo, tmp1, MPFR_RNDD);
+			  //mpfr_set(lo, tmp1, MPFR_RNDD);
+			        mpfr_swap(lo, tmp1);
 			}
 
-			mpfr_mul(tmp1, lo, I.lo, MPFR_RNDU);
-			mpfr_mul(tmp2, up, I.up, MPFR_RNDU);
-
-			if(mpfr_cmp(tmp1, tmp2) > 0)
+			if(mpfr_cmp(tmp3, tmp4) > 0)
 			{
-				mpfr_set(result_up, tmp1, MPFR_RNDU);
+			  //mpfr_set(up, tmp3, MPFR_RNDU);
+				mpfr_swap(up, tmp3);
 			}
 			else
 			{
-				mpfr_set(result_up, tmp2, MPFR_RNDU);
+			  //mpfr_set(up, tmp4, MPFR_RNDU);
+				mpfr_swap(up, tmp4);
 			}
-		}
+
+			mpfr_clears(tmp1, tmp2, tmp3, tmp4, (mpfr_ptr) 0);
+		}		
 	}
-
-	mpfr_set(lo, result_lo, MPFR_RNDD);
-	mpfr_set(up, result_up, MPFR_RNDU);
-
-	mpfr_clears(result_lo, result_up, tmp1, tmp2, (mpfr_ptr) 0);
 
 	return *this;
 }

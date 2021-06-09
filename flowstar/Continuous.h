@@ -43,6 +43,7 @@ public:
 
 	void composition(TaylorModelVec & result, const Interval & cutoff_threshold) const;
 	void composition(TaylorModelVec & result, const int order, const Interval & cutoff_threshold) const;
+	void composition_pool(TaylorModelVec & result, const int order, const Interval & cutoff_threshold) const;
 	void composition(TaylorModelVec & result, const std::vector<int> & orders, const Interval & cutoff_threshold) const;
 	void composition(TaylorModelVec & result, const std::vector<int> & outputAxes, const int order, const Interval & cutoff_threshold) const;
 

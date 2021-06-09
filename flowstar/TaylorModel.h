@@ -9,7 +9,10 @@
 #ifndef TAYLORMODEL_H_
 #define TAYLORMODEL_H_
 
+#include "ctpl/ctpl_stl.h"
+
 #include "Polynomial.h"
+#include "NNTaylorModel.h"
 
 namespace flowstar
 {
@@ -57,7 +60,9 @@ public:
 	TaylorModel(const std::vector<Interval> & coefficients);
 	TaylorModel(const std::vector<Interval> & coefficients, const Interval & I);
 	TaylorModel(const Interval *pcoefficients, const int numVars);
+	TaylorModel(const iMatrix coefficients, const int rowIndex, const bool noTime); // added by Rado
 	TaylorModel(const TaylorModel & tm);
+	TaylorModel(const NNTaylorModel &tm); // added by Rado
 	virtual ~TaylorModel();
 
 	TaylorModel(const std::string & strPolynomial, const Variables & vars);
@@ -222,6 +227,8 @@ public:
 	TaylorModelVec(const std::vector<TaylorModel> & tms_input);
 	TaylorModelVec(const std::vector<Interval> & constants, const int numVars);
 	TaylorModelVec(const Matrix & coefficients);
+	TaylorModelVec(const Matrix & coefficients, bool noTime); //added by Rado
+	TaylorModelVec(const iMatrix & coefficients, bool noTime); //added by Rado
 	TaylorModelVec(iMatrix & coefficients);
 	TaylorModelVec(const std::vector<Interval> & coefficients);
 	TaylorModelVec(const Matrix & coefficients, const std::vector<Interval> & remainders);
@@ -280,6 +287,7 @@ public:
 	void rmZeroTerms(const std::vector<int> & indices);
 
 	void insert(TaylorModelVec & result, const TaylorModelVec & vars, const std::vector<Interval> & varsPolyRange, const std::vector<Interval> & domain, const Interval & cutoff_threshold) const;
+	void insert_par(TaylorModelVec & result, const TaylorModelVec & vars, const std::vector<Interval> & varsPolyRange, const std::vector<Interval> & domain, const Interval & cutoff_threshold) const;
 	void insert_normal(TaylorModelVec & result, const TaylorModelVec & vars, const std::vector<Interval> & varsPolyRange, const std::vector<Interval> & step_exp_table, const int numVars, const Interval & cutoff_threshold) const;
 
 	void insert_ctrunc(TaylorModelVec & result, const TaylorModelVec & vars, const std::vector<Interval> & varsPolyRange, const std::vector<Interval> & domain, const int order, const Interval & cutoff_threshold) const;
@@ -396,6 +404,7 @@ public:
 
 	TaylorModelVec & operator = (const TaylorModelVec & tmv);
 };
+
 
 class ParseSetting
 {

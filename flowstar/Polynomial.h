@@ -9,6 +9,7 @@
 #ifndef POLYNOMIAL_H_
 #define POLYNOMIAL_H_
 
+#include "NNPolynomial.h"
 #include "Monomial.h"
 #include "Matrix.h"
 
@@ -16,9 +17,12 @@ namespace flowstar
 {
 
 class Polynomial;
+class NNPolynomial;
 class UnivariatePolynomial;
 class TaylorModel;
 class TaylorModelVec;
+class NNTaylorModel;
+class NNTaylorModelVec;
 class Flowpipe;
 
 extern std::vector<Interval> factorial_rec;
@@ -123,12 +127,16 @@ public:
 	void insert_only_remainder(Interval & result, RangeTree *tree, const TaylorModelVec & vars, const Interval & timeStep) const;
 
 	void dump(FILE *fp, const std::vector<std::string> & varNames) const;	// only for tests
+	void print(const std::vector<std::string> & varNames) const;
 
 	HornerForm & operator = (const HornerForm & hf);
 
 	friend class Polynomial;
 	friend class TaylorModel;
 	friend class TaylorModelVec;
+	friend class NNTaylorModel;
+	friend class NNTaylorModelVec;	
+	friend class NNPolynomial;	
 };
 
 class Polynomial				// polynomials in monomial form
@@ -146,6 +154,7 @@ public:
 	Polynomial(const int varID, const int degree, const int numVars);
 	Polynomial(const UnivariatePolynomial & up, const int numVars);
 	Polynomial(const Polynomial & polynomial);
+	Polynomial(const NNPolynomial & polynomial);
 	virtual ~Polynomial();
 
 	Polynomial(const std::string & strPolynomial, const Variables & vars);

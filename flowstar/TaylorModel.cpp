@@ -8,12 +8,12 @@
 
 #include "TaylorModel.h"
 #include "expression.h"
+#include <sys/time.h>
 
 flowstar::ParseSetting parseSetting;
 flowstar::ParseResult parseResult;
 
 using namespace flowstar;
-
 
 // class Taylor_Model_Computation_Setting
 
@@ -134,6 +134,28 @@ TaylorModel::TaylorModel(const std::vector<Interval> & coefficients)
 	remainder = intZero;
 }
 
+TaylorModel::TaylorModel(const iMatrix coefficients, const int rowIndex, const bool noTime)
+{
+
+        std::vector<Interval> new_coefficients;
+	Interval intZero;
+
+	if (noTime){
+		new_coefficients.push_back(intZero); // add time
+	}
+
+	int cols = coefficients.cols();
+
+	for(int i = 0; i < cols; i++){
+	        new_coefficients.push_back(coefficients.getDataAt(rowIndex * cols + i));
+	}
+
+	Polynomial polyTemp(new_coefficients);
+	expansion = polyTemp;
+	remainder = intZero;	
+
+}
+
 TaylorModel::TaylorModel(const std::vector<Interval> & coefficients, const Interval & I)
 {
 	Polynomial polyTemp(coefficients);
@@ -187,6 +209,12 @@ TaylorModel::TaylorModel(const std::string & strPolynomial, const Interval & rem
 
 	expansion = parsePolynomial.result;
 	remainder = rem;
+}
+
+TaylorModel::TaylorModel(const NNTaylorModel &tm)
+{
+        expansion = Polynomial(tm.expansion);
+	remainder = tm.remainder;
 }
 
 void TaylorModel::clear()
@@ -507,7 +535,7 @@ void TaylorModel::mul_insert_ctrunc(TaylorModel & result, const TaylorModel & tm
 	result.remainder = I1xI2;
 	result.remainder += P2xI1;
 	result.remainder += P1xI2;
-	
+
 	result.ctrunc(domain, order);
 	result.cutoff(domain, cutoff_threshold);
 }
@@ -844,7 +872,7 @@ void TaylorModel::insert(TaylorModel & result, const TaylorModelVec & vars, cons
 	else
 	{
 		HornerForm hf;
-		expansion.toHornerForm(hf);
+		expansion.toHornerForm(hf);		
 
 		hf.insert(result, vars, varsPolyRange, domain, cutoff_threshold);
 		result.remainder += remainder;
@@ -905,7 +933,6 @@ void TaylorModel::insert_ctrunc(TaylorModel & result, const TaylorModelVec & var
 	{
 		HornerForm hf;
 		expansion.toHornerForm(hf);
-
 		hf.insert_ctrunc(result, vars, varsPolyRange, domain, order, cutoff_threshold);
 		result.remainder += remainder;
 
@@ -2909,6 +2936,52 @@ TaylorModelVec::TaylorModelVec(const Matrix & coefficients)
 	}
 }
 
+TaylorModelVec::TaylorModelVec(const Matrix & coefficients, bool noTime)
+{
+  
+        int cols = coefficients.cols();
+
+	if(noTime) cols ++; //add an extra column for time
+	
+	RowVector rowVec(cols);
+
+	int rows = coefficients.rows();
+	
+	for(int i=0; i<rows; ++i)
+	{
+
+	        if(noTime){
+		        coefficients.row_no_time(rowVec, i);		  
+		}
+		else{
+		        coefficients.row(rowVec, i);
+		}
+		TaylorModel tmTemp(rowVec);
+		tms.push_back(tmTemp);
+	}
+		
+}
+
+TaylorModelVec::TaylorModelVec(const iMatrix & coefficients, bool noTime)
+{
+  
+        int cols = coefficients.cols();
+
+	if(noTime) cols ++; //add an extra column for time
+	
+	RowVector rowVec(cols);
+
+	int rows = coefficients.rows();
+	
+	for(int i=0; i<rows; ++i)
+	{
+
+	        TaylorModel tmTemp(coefficients, i, noTime);
+		tms.push_back(tmTemp);
+	}
+		
+}
+
 TaylorModelVec::TaylorModelVec(iMatrix & coefficients)
 {
 	int cols = coefficients.cols();
@@ -3415,6 +3488,7 @@ void TaylorModelVec::rmZeroTerms(const std::vector<int> & indices)
 
 void TaylorModelVec::insert(TaylorModelVec & result, const TaylorModelVec & vars, const std::vector<Interval> & varsPolyRange, const std::vector<Interval> & domain, const Interval & cutoff_threshold) const
 {
+	
 	result.clear();
 
 	for(int i=0; i<tms.size(); ++i)

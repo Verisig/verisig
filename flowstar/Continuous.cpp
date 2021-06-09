@@ -7,7 +7,7 @@
 ---*/
 
 #include "Continuous.h"
-#include "DNN.h"
+#include "DNNResets.h"
 
 using namespace flowstar;
 
@@ -46,6 +46,7 @@ Flowpipe::Flowpipe(const std::vector<Interval> & box, const Interval & I)
 	}
 
 	Matrix coefficients_of_tmvPre(rangeDim, rangeDim+1);
+
 
 	for(int i=0; i<rangeDim; ++i)
 	{

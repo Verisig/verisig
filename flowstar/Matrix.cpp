@@ -45,6 +45,12 @@ Matrix::Matrix(const Matrix & A)
 	}
 }
 
+Matrix::Matrix(const gsl_matrix *coefficients)
+{
+        data = gsl_matrix_alloc(coefficients->size1, coefficients->size2);
+	gsl_matrix_memcpy(data, coefficients);
+}
+
 Matrix::~Matrix()
 {
 	if(data != NULL)
@@ -78,6 +84,18 @@ void Matrix::row(RowVector & result, const int i) const
 	for(int j=0; j<data->size2; ++j)
 	{
 		result.set(gsl_matrix_get(data, i, j), j);
+	}
+}
+
+void Matrix::row_no_time(RowVector & result, const int i) const
+{
+
+        //first, add 0 for time
+        result.set(0, 0);
+	
+	for(int j=0; j<data->size2; ++j)
+	{
+		result.set(gsl_matrix_get(data, i, j), j+1);
 	}
 }
 
@@ -1500,6 +1518,25 @@ iMatrix::iMatrix(const rMatrix & A)
 	}
 }
 
+iMatrix::iMatrix(const gsl_matrix *coefficients)
+{
+
+	size1 = coefficients->size1;
+	size2 = coefficients->size2;
+
+	int size_total = size1 * size2;
+	data = new Interval[size_total];
+
+	for(int i=0; i<size1; ++i)
+	{
+	  	for(int j=0; j<size2; ++j)
+		{
+		        Interval I(gsl_matrix_get(coefficients, i, j));
+			data[i * size2 + j] = I;
+		}
+	}
+}
+
 iMatrix::iMatrix(const iMatrix2 & A)
 {
 	size1 = A.center.size1;
@@ -1552,6 +1589,121 @@ iMatrix::iMatrix(const std::string & matlab_format)
 iMatrix::~iMatrix()
 {
 	delete [] data;
+}
+
+Interval iMatrix::getDataAt(const int i) const
+{
+        return data[i];
+}
+
+void iMatrix::getDataAt(Interval & I, const int i) const
+{
+        I.set(data[i]);
+}
+
+double iMatrix::getDoubleAt(const int i, const int j) const
+{
+
+        int index = j + i * size2;
+
+        return data[index].inf();
+  
+}
+
+void iMatrix::print_matrix() const
+{
+        for(int i = 0; i < size1; i++){
+	        printf("row %d: ", i+1);
+		for(int j = 0; j < size2; j++){
+		        printf("%f, ", getDoubleAt(i, j));
+		}
+		printf("\n");
+	}
+}
+
+void iMatrix::setDataAt(const int i, const int j, const Real &value)
+{
+
+        int index = j + i * size2;
+
+	data[index].set(value);
+  
+}
+
+void iMatrix::setDataAt(const int i, const int j, const Interval &value)
+{
+
+        int index = j + i * size2;
+
+	data[index].set(value);
+  
+}
+  
+void iMatrix::getMaxGapIdentity(Real &maxGap, const iMatrix t)
+{
+
+	Real zeroR, oneR(1);
+	maxGap = Real(0);
+
+	int rows = t.rows();
+	int cols = t.cols();
+
+	for(int i = 0; i < rows; i++){
+	        for(int j = 0; j < cols; j++){
+
+		        Real l, u;
+
+			Real curTarget = zeroR;
+
+			if (i == j) curTarget = oneR;
+
+			t.getDataAt(i * cols + j).sup(u);
+			t.getDataAt(i * cols + j).inf(l);
+			
+			if(curTarget > u){
+			        Real curGap = curTarget - u;
+			
+				if(curGap > maxGap) maxGap = curGap;
+			}
+
+			else if(l > curTarget){
+
+			        Real curGap = l - curTarget;
+			
+				if(curGap > maxGap) maxGap = curGap;
+			}
+		}
+	}
+}
+
+void iMatrix::getMinRowSum(Real &minSum, const iMatrix t)
+{
+
+        minSum = Real(0);
+
+	int rows = t.rows();
+	int cols = t.cols();	
+
+	for(int i = 0; i < rows; i++){
+
+	        Real curAbsSum(0), curSum(0);
+	  
+	        for(int j = 0; j < cols; j++){
+
+		        Real u;
+
+			t.getDataAt(i * cols + j).sup(u);
+
+			curSum += u;
+			
+		}
+
+		curSum.abs(curAbsSum);
+
+		if (i == 0) minSum = curAbsSum;
+
+		if (minSum > curAbsSum) minSum = curAbsSum;
+	}
 }
 
 void iMatrix::clear()

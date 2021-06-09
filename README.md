@@ -24,14 +24,15 @@ Verisig has been tested on Ubuntu (16.04 and 18.04) using Java 1.8. A complete e
 After installing the distribution using `./gradlew installDist`, you can use the executor script with the -h flag to see available command-line options:
 ```
 $ ./verisig -h
-Verisig v0.9 Usage:
-verisig [options...] spaceex_xml dnn_yml
+Verisig v2.0 Usage:
+verisig [options...] spaceex_xml dnn_yml [additional dnn_yml ...]
  --flowstar-cmd CMD             : Custom flow* command (default: flowstar)
  --help (-h)                    : print help message (default: true)
  --no-flowstar (-nf)            : System composition only (default: false)
  --output-model (-o)            : Enable flow* model output (default: false)
  --output-model-name (-of) PATH : Flow* model output location (overrides -o)
  --spaceex-config (-sc) PATH    : SpaceEx 'cfg' file
+ --threads (-t) N               : Number of threads (default: 1)
  --verbose (-v)                 : enable verbose printing (default: false)
  --verisig-config (-vc) PATH    : Verisig yaml config
  --version                      : print version (default: false)
@@ -47,14 +48,16 @@ verisig [options...] spaceex_xml dnn_yml
 
 `--spaceex-config PATH` is used to specify the path to the SpaceEx _.cfg_ file. The default value is that of the SpaceEx XML file but with a _.cfg_ extension.
 
+`--threads N` is used to specify number of threads to use when running Flow*. The default value is 1.
+
 `--verisig-config PATH` is used to specify the path to the Verisig _.yml_ configuration file. The default value is that of the SpaceEx XML file but with a _.yml_ extension.
 
 
 #### Example
-The following command can be run from the local directory to verify a single interval of the cartpole example:
+The following command can be run from the local directory to verify a single interval of the mountain car example:
 
 ```
-./verisig --flowstar-command ./flowstar/flowstar examples/mountain_car/MC.xml examples/mountain_car/sig16x16.yml
+./verisig --flowstar-cmd ./flowstar/flowstar examples/mountain_car/MC.xml examples/mountain_car/sig16x16.yml
 ```
 
 Look at the file __examples/mountain_car/multi_runner.py__ to see how one can verify the entire range of the unsafe set that was used in the case-study.

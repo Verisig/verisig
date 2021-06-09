@@ -10,10 +10,11 @@
 #define MONOMIAL_H_
 
 #include "Interval.h"
+#include "NNMonomial.h"
 
 namespace flowstar
 {
-
+  
 class Monomial
 {
 protected:
@@ -26,6 +27,8 @@ public:
 	Monomial(const Interval & I, const std::vector<int> & degs);
 	Monomial(const Monomial & monomial);
 	Monomial(const Interval & I, const int numVars);			// a constant
+	Monomial(const NNMonomial &monomial); // convert between the two types
+	Monomial(const std::shared_ptr<NNMonomial> &monomial); // convert between the two types			
 	~Monomial();
 
 	int degree() const;											// degree of the monomial
@@ -34,6 +37,8 @@ public:
 	//code added by Rado
 	std::vector<int> getDegrees() const;
 	Interval getCoefficient() const;
+	int getNumVars() const;
+	int getDegree(const int index) const;	
 	//end of code added by Rado
 
 	void intEval(Interval & result, const std::vector<Interval> & domain) const;	// interval evaluation of the monomial
@@ -77,7 +82,10 @@ public:
 	void extend();
 
 	friend class Polynomial;
+	friend class NNPolynomial;	
 	friend class TaylorModel;
+	friend class NNTaylorModel;
+	friend class NNMonomial;
 	friend class TaylorModelVec;
 	friend class UnivariatePolynomial;
 	friend class iMatrix;

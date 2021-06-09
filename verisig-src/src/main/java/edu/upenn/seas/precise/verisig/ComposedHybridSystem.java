@@ -25,34 +25,41 @@ import java.util.regex.Pattern;
 
 public class ComposedHybridSystem {
     public Map<String,Object> config;
-    public DNN dnn;
-    public Plant plant;
+
     public List<String> allStates;
     public List<String> dnnStates;
     public List<String> plantStates;
-    public List<Mode> modes;
+
+    Map<Integer, String> nameMap;
+
+    public List<Mode> allModes;
+    public List<Mode> dnnModes;
+    public List<Mode> plantModes;
+
     public List<Jump> jumps;
+
     public Map<String,String> properties;
 
     public boolean plottingEnabled = false;
     public boolean dumpingEnabled = false;
 
     public static List<String> PROPERTY_ORDER = Arrays.asList("adaptive steps", "time", "remainder estimation", "identity precondition",
-            "gnuplot", "fixed orders", "cutoff", "precision", "output", "max jumps", "print");
+            "PLOT", "fixed orders", "cutoff", "precision", "output", "max jumps", "print");
     public static Pattern ATAN_PATTERN = Pattern.compile("_arc_(_?[^_\\W]+)_(_?[^_\\W]+)(?:_([^_\\W]+))?");
     public static Pattern SQRT_PATTERN = Pattern.compile("_sqrt_(_?[^_\\W]+)_(_?[^_\\W]+)(?:_([^_\\W]+))?");
     public static Pattern DIV_PATTERN = Pattern.compile("_div_(_?[^_\\W]+)_(_?[^_\\W]+)(?:_([^_\\W]+))?");
     public static Pattern COS_PATTERN = Pattern.compile("_cos_(_?[^_\\W]+)_(_?[^_\\W]+)(?:_([^_\\W]+))?");
     public static Pattern SIN_PATTERN = Pattern.compile("_sin_(_?[^_\\W]+)_(_?[^_\\W]+)(?:_([^_\\W]+))?");
 
-    public ComposedHybridSystem(Map<String, Object> config, DNN dnn, Plant plant) {
-        this.config = config;
-        this.dnn = dnn;
-        this.plant = plant;
+    public static Pattern DNN_PATTERN = Pattern.compile("DNN\\d*");
 
-        composeVariables();
-        composeModes();
-        composeJumps();
+    public ComposedHybridSystem(Map<String, Object> config, List<String> states, Map<Integer, Map<String, Object>> modes, Map<Integer, String> nameMap) {
+        this.config = config;
+        this.nameMap = nameMap;
+
+        composeVariables(states);
+        composeModes(modes);
+        composeJumps(modes);
 
         populateProperties();
 
@@ -65,10 +72,10 @@ public class ComposedHybridSystem {
         }
     }
 
-    protected void composeVariables() {
+    protected void composeVariables(List<String> states) {
         dnnStates = new ArrayList<>();
         plantStates = new ArrayList<>();
-        for( String state : plant.states ) {
+        for( String state : states ) {
             if( state.startsWith("_f") )
             {
                 dnnStates.add(state);
@@ -84,25 +91,37 @@ public class ComposedHybridSystem {
         allStates.add("clock");
     }
 
-    protected void composeModes() {
-        modes = createDNNModes();
-        modes.addAll(createPlantModes());
+    protected void composeModes(Map<Integer, Map<String, Object>> modes) {
+        dnnModes = new ArrayList<>();
+        plantModes = new ArrayList<>();
+
+        for (Map.Entry<Integer, Map<String, Object>> entry : modes.entrySet()) {
+            String modeName = (String) entry.getValue().get("name");
+
+            Matcher matcher = DNN_PATTERN.matcher(modeName);
+            if(matcher.matches()) {
+                dnnModes.addAll(createDNNMode(modeName));
+            } else {
+                plantModes.add(createPlantMode(entry.getKey(), entry.getValue()));
+            }
+        }
+
+        allModes = new ArrayList<>();
+        allModes.addAll(dnnModes);
+        allModes.addAll(plantModes);
     }
 
-    protected List<Mode> createDNNModes() {
-        List<Mode> modes = new ArrayList<>();
-        modes.add( createDNNMode(0));
-        modes.add( createDNNMode(1, "DNN"));
+    protected List<Mode> createDNNMode(String modeName) {
+        Mode prefixMode = new Mode("_" + modeName);
 
-        return modes;
-    }
+        for(String state : allStates) {
+            prefixMode.dynamics.put(state, state + "\' = 0");
+        }
 
-    protected Mode createDNNMode(int modeIndex) {
-        return createDNNMode(modeIndex, "");
-    }
+        prefixMode.dynamics.put("clock", "clock\' = 1");
+        prefixMode.invariant.add("clock <= 0");
 
-    protected Mode createDNNMode(int modeIndex, String prefix) {
-        Mode mode = new Mode(prefix + "m" + modeIndex);
+        Mode mode = new Mode(modeName);
 
         for(String state : allStates) {
             mode.dynamics.put(state, state + "\' = 0");
@@ -111,17 +130,7 @@ public class ComposedHybridSystem {
         mode.dynamics.put("clock", "clock\' = 1");
         mode.invariant.add("clock <= 0");
 
-        return mode;
-    }
-
-    protected List<Mode> createPlantModes() {
-        List<Mode> modes = new ArrayList<>();
-
-        for (Map.Entry<Integer, Map<String, Object>> entry : plant.modes.entrySet()) {
-            modes.add(createPlantMode(entry.getKey(), entry.getValue()));
-        }
-
-        return modes;
+        return Arrays.asList(prefixMode, mode);
     }
 
     protected Mode createPlantMode(int modeId, Map<String,Object> modeMap) {
@@ -180,40 +189,44 @@ public class ComposedHybridSystem {
                 modeName = prefix + "_" + storeVarIndex + "_" + inputVarIndex + "_1";
             }
 
-            plant.nameMap.put(modeId, modeName);
+            nameMap.put(modeId, modeName);
         }
 
         return new Mode(modeName, dynamics, invariant);
     }
 
-    protected void composeJumps() {
+    protected void composeJumps(Map<Integer, Map<String, Object>> modes) {
         jumps = createDNNJumps();
-        jumps.addAll(createPlantJumps());
-        jumps.addAll(createDNN2PlantJumps());
-        jumps.addAll(createPlant2DNNJumps());
+        jumps.addAll(createPlantJumps(modes));
     }
 
     protected List<Jump> createDNNJumps() {
-        Jump jump = new Jump("m0", "DNNm1");
-
-        /*for( int state = 0; state < dnn.numStates(); state++ ) {
-            jump.reset.add("_f" + (state+1) +"\' := _f" + (state+1));
-        }*/
-
-        jump.reset.add("clock\' := 0");
         List<Jump> jumps = new ArrayList<>();
-        jumps.add(jump);
+        for(Mode mode : dnnModes) {
+            if(mode.name.startsWith("_")) {
+                Jump jump = new Jump(mode.name, mode.name.substring(1));
+                jump.reset.add("clock\' := 0");
+
+                jumps.add(jump);
+            }
+        }
 
         return jumps;
     }
 
-    protected List<Jump> createPlantJumps() {
+    protected List<Jump> createPlantJumps(Map<Integer, Map<String, Object>> modes) {
         List<Jump> jumps = new ArrayList<>();
 
-        for (Map.Entry<Integer, Map<String, Object>> entry : plant.modes.entrySet()) {
-            String fromMode = plant.nameMap.get(entry.getKey());
+        for (Map.Entry<Integer, Map<String, Object>> entry : modes.entrySet()) {
+            String fromMode = nameMap.get(entry.getKey());
             for (Map.Entry<Integer, List<Map<String, Object>>> transitionEntry : ((Map<Integer, List<Map<String, Object>>>) entry.getValue().get("transitions")).entrySet()) {
-                String toMode = plant.nameMap.get(transitionEntry.getKey());
+                String toMode = nameMap.get(transitionEntry.getKey());
+
+                Matcher matcher = DNN_PATTERN.matcher(toMode);
+                if(matcher.matches()) {
+                    toMode = "_" + toMode;
+                }
+
                 for (Map<String, Object> transition : transitionEntry.getValue()) {
                     jumps.add(createPlantJump(fromMode, toMode, transition));
                 }
@@ -227,37 +240,6 @@ public class ComposedHybridSystem {
         return new Jump(fromMode, toMode, (List<String>)transition.get("guard"), (List<String>)transition.get("reset"));
     }
 
-    protected List<Jump> createDNN2PlantJumps() {
-        List<Jump> jumps = new ArrayList<>();
-
-        String dnnMode = "DNNm1";
-        for (Map.Entry<Integer, List<Map<String, Object>>> entry : plant.glue.get("dnn2plant").entrySet()) {
-            String toMode = plant.nameMap.get(entry.getKey());
-
-            for (Map<String, Object> transition : entry.getValue()) {
-                jumps.add(createPlantJump(dnnMode, toMode, transition));
-            }
-        }
-
-        return jumps;
-    }
-
-    protected List<Jump> createPlant2DNNJumps() {
-        List<Jump> jumps = new ArrayList<>();
-
-        String dnnMode = "m0";
-
-        for (Map.Entry<Integer, List<Map<String, Object>>> entry : plant.glue.get("plant2dnn").entrySet()) {
-            String fromMode = plant.nameMap.get(entry.getKey());
-
-            for (Map<String, Object> transition : entry.getValue()) {
-                jumps.add(createPlantJump(fromMode, dnnMode, transition));
-            }
-        }
-
-        return jumps;
-    }
-
     protected void populateProperties() {
         properties = new HashMap<>();
 
@@ -265,7 +247,7 @@ public class ComposedHybridSystem {
         properties.put("time", "100");
         properties.put("remainder estimation", "1e-1");
         properties.put("identity precondition", "");
-        properties.put("gnuplot", "octagon clock, _f1");
+        properties.put("PLOT", "gnuplot octagon clock, _f1");
         properties.put("fixed orders", "4");
         properties.put("cutoff", "1e-18");
         properties.put("precision", "100");
@@ -279,6 +261,13 @@ public class ComposedHybridSystem {
                 properties.put(key, String.valueOf(config.get(key)));
             }
         }
+
+        if(config.containsKey("gnuplot")) {
+            properties.put("PLOT", "gnuplot " + config.get("gnuplot"));
+        } else if(config.containsKey("matlab")) {
+            properties.put("PLOT", "matlab " + config.get("matlab"));
+        }
+
     }
 
     protected void writeInitialCondition(BufferedWriter stream) throws IOException {
@@ -286,7 +275,15 @@ public class ComposedHybridSystem {
         stream.write("\t{\n");
 
         Map<String, Object> initialization = (Map<String,Object>)config.get("init");
-        stream.write("\t\t" + ((String)initialization.get("mode")).trim() + "\n");
+
+        String initModeName = ((String)initialization.get("mode")).trim();
+
+        Matcher matcher = DNN_PATTERN.matcher(initModeName);
+        if(matcher.matches()) {
+            initModeName = "_" + initModeName;
+        }
+
+        stream.write("\t\t" + initModeName + "\n");
         stream.write("\t\t{\n");
 
         for( String state : (List<String>)initialization.get("states") ) {
@@ -302,10 +299,6 @@ public class ComposedHybridSystem {
                     notInit = false;
                     break;
                 }
-            }
-
-            if( notInit ) {
-                stream.write("\t\t\t" + state + " in [0, 0]\n");
             }
         }
 
@@ -350,7 +343,11 @@ public class ComposedHybridSystem {
         stream.write("\t{\n");
 
         for( String key : PROPERTY_ORDER ) {
-            stream.write("\t\t" + key + " " + String.valueOf(properties.get(key)).trim() + "\n");
+            if(key.equals("PLOT")) {
+                stream.write("\t\t" + String.valueOf(properties.get(key)).trim() + "\n");
+            } else {
+                stream.write("\t\t" + key + " " + String.valueOf(properties.get(key)).trim() + "\n");
+            }
         }
 
         stream.write("\t}\n\n");
@@ -358,7 +355,7 @@ public class ComposedHybridSystem {
         stream.write("\tmodes\n");
         stream.write("\t{\n");
 
-        for( Mode mode : modes ) {
+        for( Mode mode : allModes ) {
             stream.write("\t\t" + mode.name + "\n");
             stream.write("\t\t{\n");
             stream.write("\t\t\t" + mode.odetype + "\n");

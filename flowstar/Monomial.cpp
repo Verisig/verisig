@@ -37,6 +37,35 @@ Monomial::Monomial(const Interval & I, const int numVars):d(0)
 	coefficient = I;
 }
 
+Monomial::Monomial(const NNMonomial &monomial)
+{
+
+        coefficient = (*monomial.coefficient);
+	//degrees = monomial.degrees;
+	degrees = std::vector<int>(monomial.num_vars);
+
+	for(auto i=monomial.degrees_map.begin(); i != monomial.degrees_map.end(); ++i){
+	        degrees[i->first] = i->second;
+	}
+	
+	d = monomial.d;
+  
+}
+
+Monomial::Monomial(const std::shared_ptr<NNMonomial> &monomial)
+{
+
+        coefficient = (*monomial->coefficient);
+	//degrees = monomial->degrees;
+	degrees = std::vector<int>(monomial->num_vars);
+
+	for(auto i=monomial->degrees_map.begin(); i != monomial->degrees_map.end(); ++i){
+	        degrees[i->first] = i->second;
+	}	
+	d = monomial->d;
+  
+}
+
 Monomial::~Monomial()
 {
 	degrees.clear();
@@ -58,6 +87,17 @@ Interval Monomial::getCoefficient() const
 
         return coefficient;
 }
+
+int Monomial::getNumVars() const
+{
+        return degrees.size();
+}
+
+int Monomial::getDegree(const int index) const
+{ 
+        return degrees[index];
+}
+
 
 //end of code added by Rado
 

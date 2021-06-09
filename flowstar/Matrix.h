@@ -41,6 +41,7 @@ public:
 	Matrix(const int m, const int n);	// Create an m x n matrix, all of the entries are 0.
 	Matrix(const int n);				// Create an n x n matrix, all of the entries are 0.
 	Matrix(const Matrix & A);
+	Matrix(const gsl_matrix *coefficients); // added by Rado
 	~Matrix();
 
 	double get(const int i, const int j) const;				// Get the entry at position [i,j].
@@ -50,6 +51,7 @@ public:
 	int cols() const;
 
 	void row(RowVector & result, const int i) const;			// Return the (i+1)-st row.
+	void row_no_time(RowVector & result, const int i) const;			// Return the (i+1)-st row, add time as a first column
 
 	void sortColumns();		// Sort the columns by size in descending order.
 	int rank() const;
@@ -250,7 +252,17 @@ public:
 	iMatrix(const iMatrix2 & A);
 	iMatrix(const std::vector<Interval> & box);
 	iMatrix(const std::string & matlab_format);
+	iMatrix(const gsl_matrix *coefficients); // added by Rado
 	~iMatrix();
+
+	Interval getDataAt(const int i) const; //added by Rado
+        void getDataAt(Interval & I, const int i) const; //added by Rado
+        double getDoubleAt(int i, int j) const; //added by Rado
+	void getMaxGapIdentity(Real &maxGap, const iMatrix t); //added by Rado
+	void getMinRowSum(Real &maxSum, const iMatrix t); //added by Rado
+	void setDataAt(const int i, const int j, const Real &value); // added by Rado
+	void setDataAt(const int i, const int j, const Interval &value); // added by Rado
+	void print_matrix() const; //added by Rado
 
 	void clear();
 

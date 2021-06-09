@@ -85,6 +85,7 @@ public:
 	void exp_assign();
 	void log_assign();
 	void sqrt_assign();
+	void atan_assign();
 
 //	Real & operator *= (const Interval & I);
 	Interval operator * (const Interval & I) const;
@@ -135,9 +136,12 @@ public:
 
 	bool isZero() const;
 
+	bool subsetZero() const; //added by Rado
+
 	void set(const double l, const double u);
 	void set(const double c);
 	void set(const Real & r);
+	void set(const Interval & i); //added by Rado
 
 	void setInf(const double l);
 	void setInf(const Interval & I);
@@ -188,6 +192,9 @@ public:
 	bool subseteq(const Interval & I) const;	// returns true if the interval is a subset of I
 	bool supseteq(const Interval & I) const;	// returns true if the interval is a superset of I
 	bool valid() const;
+
+	void mul_01(); // added by Rado (multiply by [0,1])
+	void mul_m11(); // added by Rado (multiply by [-1,1])
 
 	bool operator == (const Interval & I) const;
 	bool operator != (const Interval & I) const;
