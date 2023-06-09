@@ -1278,6 +1278,19 @@ void dnn::load_dnn(std::vector<iMatrix> &reset_weights, std::vector<iMatrix> &re
             if(offsets[i+1].size() > numNeurStates) numNeurStates = offsets[i+1].size();
     }
 
+    // count number of _f states; if more _f states than neurons,
+    // set the number of neural states to be the number of inputs
+    int num_f_states = 0;
+    for(int varInd = 0; varInd < vars.varNames.size(); varInd++){
+        if(!strncmp(vars.varNames[varInd].c_str(), "_f", strlen("_f"))){
+	    num_f_states++;
+	}
+    }
+
+    if (numNeurStates < num_f_states){
+        numNeurStates = num_f_states;
+    }    
+
     std::unordered_set <std::string> names_set;
     
     //add all DNN variables
@@ -1330,28 +1343,16 @@ void dnn::load_dnn(std::vector<iMatrix> &reset_weights, std::vector<iMatrix> &re
         int currentNeuron = 1;
         for(const_iterator neuronIt=layer.begin(); neuronIt != layer.end(); ++neuronIt) {
 
-	    //int currentWeight = 1;
+            for(int j = 0; j < layerSize; j++) {
 
-	    //stringstream buffer;
-            for(int i = 0; i < layerSize; i++) {
+		Real cur_weight((double) (*neuronIt)[j].as<double>());
 
-	      //buffer << (*neuronIt)[i];
-	      //buffer << " * " << "_f" << currentWeight << + " + ";
-
-	      //currentWeight++;
-
-		Real cur_weight((double) (*neuronIt)[i].as<double>());
-
-		cur_weights.setDataAt(currentNeuron - 1, i, cur_weight);
+		cur_weights.setDataAt(currentNeuron - 1, j, cur_weight);
             }
 
 	    Real cur_bias((double) offsets[layerId][currentNeuron-1].as<double>());
 
 	    cur_biases.setDataAt(currentNeuron - 1, 0, cur_bias);
-
-            //buffer << offsets[layerId][currentNeuron-1];
-
-            //taylorModels["_f" + to_string(currentNeuron)] = NNTaylorModel(buffer.str(), augmentedStateVars);            
 
             currentNeuron++;
         }
