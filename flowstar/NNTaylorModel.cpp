@@ -199,6 +199,7 @@ void NNTaylorModel::insert(NNTaylorModel & result, const NNTaylorModelVec & vars
 		auto start = chrono::high_resolution_clock::now(); 		
 	        shared_ptr<NNHornerForm> hf(new NNHornerForm());
 		expansion.toHornerForm(hf);
+		
 		auto stop = chrono::high_resolution_clock::now();
 		auto duration = chrono::duration_cast<chrono::nanoseconds>(stop - start);
 		double toHFtime = duration.count();
@@ -502,7 +503,14 @@ void NNTaylorModelVec::addConstant(const iMatrix & A)
 
 		if(I.subsetZero()) continue;
 
-		tms[i].addConstant(I, tms.size());
+		int poly_num_vars = tms[i].expansion.get_num_vars();
+
+		//NB: this is a hack -- should only happen when the polynomial is empty
+		if(poly_num_vars == -1){
+		      poly_num_vars = tms.size() + 1; // extra 1 for time
+		}
+
+		tms[i].addConstant(I, poly_num_vars);
 	}
 }
 

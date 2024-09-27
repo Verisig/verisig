@@ -455,6 +455,8 @@ void NNPolynomial::toHornerForm(shared_ptr<NNHornerForm> & result) const
 	        lstMono.push_back(p);
 	}
 
+
+
         list<shared_ptr<NNMonomial>>::const_iterator iter = lstMono.begin();
 
 	if((*iter)->degree() == 0)
@@ -486,7 +488,7 @@ void NNPolynomial::toHornerForm(shared_ptr<NNHornerForm> & result) const
 				++iter;
 			}
 		}
-	}	
+	}
 
 	for(int i=0; i<numVars; ++i)
 	{
@@ -573,7 +575,23 @@ void NNPolynomial::addConstant(const Interval & constant, const int num_vars)
 	else{
 	        (*monomials_map[empty]->coefficient) += constant;
 	}
-}  
+}
+
+int NNPolynomial::get_num_vars()
+{
+
+	if(monomials_map.size() == 0)
+	{
+	       return -1;
+	}
+	else
+	{
+	       auto iter_mono = monomials_map.begin();
+	       int num_vars = iter_mono->second->num_vars;
+	       return num_vars;
+	}
+
+}
 
 void NNPolynomial::clear()
 {
@@ -644,6 +662,7 @@ void NNHornerForm::insertNN(NNTaylorModel & result, const NNTaylorModelVec & var
 		result = NNTaylorModel(tmConstant);
 	}
 
+
 	if(hornerForms.size() > 0)						// the first variable is t
 	{
 		NNTaylorModel tmTemp;
@@ -693,7 +712,7 @@ void NNHornerForm::insertNN(NNPolynomial &poly, Interval &remainder,
 
 	if(hornerForms.size() > 0) // the first variable is t
 	{
-		
+
 		for(int i=1; i<hornerForms.size(); ++i)
 		{
 
@@ -717,7 +736,7 @@ void NNHornerForm::insertNN(NNPolynomial &poly, Interval &remainder,
 			stop = chrono::high_resolution_clock::now();
 			duration = chrono::duration_cast<chrono::nanoseconds>(stop - start);
 			NNTaylorModel::mulTime += duration.count();
-
+			
 			start = chrono::high_resolution_clock::now(); 
 			poly.add_assign(new_poly);
 			stop = chrono::high_resolution_clock::now();

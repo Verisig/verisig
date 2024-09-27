@@ -100,7 +100,8 @@ public:
 	//	void toStringMap(std::string & result, const std::vector<std::string> & varNames) const;
 	
 	//void reorder();   // sort the monomials.
-	void clear();	
+	void clear();
+        int get_num_vars();
 
 	NNPolynomial & operator += (const NNPolynomial & polynomial);
 	NNPolynomial & operator -= (const NNPolynomial & polynomial);
@@ -110,7 +111,7 @@ public:
 	NNPolynomial operator + (const NNPolynomial & polynomial) const;
 	NNPolynomial operator - (const NNPolynomial & polynomial) const;
 	NNPolynomial operator * (const NNPolynomial & polynomial) const;
-	NNPolynomial operator * (const Interval & I) const;	
+	NNPolynomial operator * (const Interval & I) const;
 };
   
 }
